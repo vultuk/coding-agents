@@ -1,348 +1,256 @@
 ---
 name: pr-feedback-workflow
-description: Process all PR feedback in one pass. Fetches review comments and CI failures together, creates a unified action plan, applies fixes, replies to reviewers, resolves threads, and posts a summary. Use when asked to address PR feedback, fix review comments, handle CI failures, or process PR reviews. Works on the current branch's open PR.
-triggers:
-  - "address PR feedback"
-  - "fix review comments"
-  - "handle CI failures"
-  - "process PR reviews"
-  - "respond to reviewers"
-prerequisites:
-  - gh (GitHub CLI, authenticated)
-  - git
-  - jq (for JSON parsing in scripts)
-arguments:
-  - name: PR_NUMBER
-    required: false
-    description: The PR number (auto-detected from current branch if not provided)
+description: Continuously monitor an open GitHub pull request, process new review feedback and CI failures in a loop, apply fixes or evidence-based replies, create follow-up issues with generate-issue for out-of-scope requests, resolve review threads, and send a completion notification. Use when asked to address PR feedback continuously, handle review comments end-to-end, auto-fix CI failures, or run a PR feedback loop until stopped.
 ---
 
 # PR Feedback Workflow
 
-Gather all PR feedback (review comments + CI failures), plan holistically, then execute.
+Monitor a pull request in a continuous loop, handle all new feedback and CI failures autonomously, and keep re-checking until stopped.
 
-**Codex note:** This skill references Claude Code subagents (`Task(...)`). In Codex, run the equivalent steps with tool calls (for example `functions.shell_command` and `multi_tool_use.parallel`) or run them sequentially. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+## Follow Core Behaviour
 
-## Phase 1: Gather Context
+For each new feedback item, choose exactly one path:
 
-Run the script to collect all feedback:
+1. Fix it: implement code changes, test, commit, push, reply.
+2. No code change needed: reply with evidence-based explanation.
+3. Out of scope: create a follow-up issue via `$generate-issue`, then reply with the issue link.
 
-```bash
-scripts/load-pr-feedback.sh
-```
+Then continue monitoring for newly arriving feedback and CI updates.
 
-This fetches:
-- PR number, title, and current branch
-- All conversation comments (general PR discussion)
-- All review comments with thread IDs (code-specific feedback)
-- All review threads (resolved and unresolved)
-- Latest CI/CD run status and failure logs (if any)
-- Summary statistics
+Treat all GitHub reviews equally, including human and bot reviews. For every actionable review item, post an explicit reply and resolve the thread after action is taken.
 
-The script handles:
-- Rate limit checking before proceeding
-- Pagination for large PRs (>100 threads)
-- Graceful error handling for missing permissions
+## Enforce Hard Requirements
 
-## Phase 2: Analyse
+1. For every newly submitted review from humans or bots, process all contained actionable items.
+2. For every actionable review comment thread, always post a direct reply on that thread.
+3. After taking action (fix, explain, or follow-up issue), mark that thread resolved.
+4. If a review has a top-level body with requested action, post a PR-level response comment summarising what was done.
+5. Do not stop after one pass; continue looped monitoring by default.
+6. Use `$generate-issue` for out-of-scope follow-ups.
+7. Keep scope to the current PR; do not inspect other issues or PRs unless explicitly requested.
 
-For each piece of feedback, categorise:
+## Run Continuous Loop
 
-| Category | Action |
-|----------|--------|
-| **Code fix required** | Note the file, change needed, and which comments/CI failures it addresses |
-| **No change needed** | Prepare explanation for reviewer |
-| **Out of scope** | Prepare to create a new issue and link it |
-| **CI-only failure** | Note the fix needed (may overlap with review comments) |
-| **General question/discussion** | Prepare appropriate response |
+Default mode is watch-loop with a minimum polling interval of 300 seconds (5 minutes).
+Use a practical range of 300-420 seconds to avoid tight polling patterns.
+Do not poll more frequently unless the user explicitly asks for faster checks.
 
-Look for overlaps where one fix addresses multiple items.
+Stop only when:
+- user explicitly says stop, or
+- PR is merged or closed.
 
-Note the comment type (conversation vs review) as they use different reply mechanisms.
+Even when everything is green, keep polling for new feedback.
 
-### Prioritising Feedback
+## Run Workflow
 
-Handle feedback in this order:
-1. **Blocking issues**: Security concerns, correctness bugs, breaking changes
-2. **Required changes**: Explicitly requested by reviewers with "Request changes"
-3. **CI failures**: Tests, linting, type checking
-4. **Suggestions**: Nice-to-haves, style preferences
-5. **Questions**: Clarifications that don't block merge
+### Phase 1: Identify PR context
 
-### Handling Conflicting Opinions
-
-When reviewers disagree:
-1. Identify the core technical concern from each reviewer
-2. If both are valid, choose the approach that:
-   - Best fits existing codebase patterns
-   - Is more maintainable long-term
-   - Has better performance characteristics
-3. Reply explaining your reasoning and invite further discussion
-4. Tag both reviewers in your response
-
-## Phase 3: Create Unified Plan
-
-Before making changes, output a plan:
-
-1. Code changes to make (grouped by file)
-2. Which review comments each change addresses
-3. Which CI failures each change fixes
-4. Comments that need explanation-only replies
-5. Out-of-scope items to convert to issues
-
-Ask: "Ready to execute this plan?"
-
-Wait for confirmation.
-
-## Phase 4: Execute
-
-### 1. Apply code fixes
-
-Make all code changes, then commit:
+Resolve PR number from explicit input or current branch:
 
 ```bash
-git add -A
-git commit -m "Address PR feedback
-
-- [summary of changes]
-- Fixes review comments from @reviewer
-- Resolves CI failure in [workflow]"
-git push
+gh pr view --json number,url,title,headRefName,baseRefName,state
 ```
 
-### 2. Reply to comments
+If PR does not exist, stop and report clearly.
 
-**For code review comments** (attached to specific lines):
+### Phase 2: Poll snapshot (each loop iteration)
+
+Gather in parallel:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/comments/{comment_id}/replies \
-  -f body="Fixed: [description of change]"
+gh pr checks --json name,state,conclusion,link
+gh api repos/{owner}/{repo}/pulls/{number}/comments
+gh api repos/{owner}/{repo}/pulls/{number}/reviews
+gh api repos/{owner}/{repo}/issues/{number}/comments
+gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved comments(first:20){nodes{id body author{login} createdAt url}}}}}}}' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR_NUMBER
 ```
 
-**For PR conversation comments** (general discussion):
+Track processed comment and thread IDs so each item is handled once unless updated.
+
+Also track processed review IDs so newly submitted manual and bot reviews are always acknowledged and handled.
+
+If comments suggest broader follow-up work, keep the PR focused and use `$generate-issue` for out-of-scope tracking.
+
+### Phase 3: Classify each new actionable item
+
+Classification matrix:
+
+| Class | Action |
+|------|--------|
+| Directly required code change | Implement + test + commit + push + reply |
+| Clarification or disagreement | Reply with codebase-backed reasoning |
+| Out of scope for this PR | Create follow-up issue via `$generate-issue` + reply |
+| CI failure without review comment | Diagnose and auto-fix |
+
+### Phase 3.5: Apply review-by-review response contract
+
+For each new review with actionable feedback:
+
+1. Enumerate all inline review comments and classify each item.
+2. Execute one of the three action paths for each item.
+3. Reply on each review thread with the action outcome.
+4. Resolve that thread immediately after action is completed.
+5. If the review includes a top-level summary or request, add one PR-level comment summarising disposition.
+
+Use these primitives:
 
 ```bash
-gh pr comment {PR_NUMBER} -b "Replying to @{author}: [response]"
+# Reply to a review comment
+gh api repos/{owner}/{repo}/pulls/comments/{comment_id}/replies -f body="<response>"
+
+# Resolve review thread
+gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$THREAD_ID"
 ```
 
-Reply templates:
-- Fix applied: `Fixed: [what was changed]`
-- No change needed: `No change required: [explanation]`
-- Out of scope: `Good suggestion, tracked as #[issue_number]`
-- Acknowledgement: `Thanks for the feedback, [response]`
+### Phase 4: Execute actions
 
-### Declining suggestions diplomatically
+#### A) Fix path
 
-When you disagree with a suggestion:
+1. Apply minimal code change.
+2. Run relevant tests, lint, typecheck, and build.
+3. Commit and push.
+4. Reply to comment with what changed (include file paths).
+5. Resolve the thread once fix is in place and reply is posted.
 
-```
-Thanks for the suggestion. I considered this approach but chose [current approach] because:
+#### B) No-change path
 
-1. [Technical reason]
-2. [Practical reason]
+Reply with concise technical justification and references:
+- cite existing pattern files
+- explain why requested change is not needed now
+- keep tone collaborative
 
-Happy to discuss further if you see issues with this reasoning.
-```
+Resolve thread only if reply fully addresses concern.
 
-### 3. Create issues for out-of-scope items
+In this workflow, once explanation is posted as the chosen action and no further change is pending, resolve the thread.
 
-```bash
-gh issue create \
-  -t "Enhancement: [title]" \
-  -b "Suggested during PR review of #[PR_NUMBER].
+#### C) Out-of-scope path (must use `$generate-issue`)
 
-## Context
-[Original comment]
+Before creating a follow-up issue, keep momentum and focus on the actionable request.
 
-## Suggested approach
-[Implementation ideas]"
-```
+Invoke `$generate-issue` with full context:
 
-### 4. Resolve review threads
-
-Use the helper script:
-
-```bash
-scripts/resolve-thread.sh <THREAD_ID>
+```text
+Prompt payload:
+- Source PR: #<number> <url>
+- Reviewer comment URL and text
+- Why this is out of scope for current PR
+- Suggested follow-up direction
+Expected output: created issue URL and number
 ```
 
-Or manually via GraphQL:
+Then reply on the PR comment:
 
-```bash
-gh api graphql -f query='
-  mutation {
-    resolveReviewThread(input: {threadId: "<THREAD_ID>"}) {
-      thread { id isResolved }
-    }
-  }'
+```text
+Great suggestion. This is out of scope for this PR, so I opened <issue-url> to track it and keep this PR focused.
 ```
 
-**Note:** Only resolve threads where the feedback has been addressed. Leave threads open if discussion is ongoing.
+Resolve the thread after posting the follow-up issue link.
 
-### 5. Verify CI passes
+### Phase 5: CI self-healing
 
-Wait for CI to complete after pushing:
+If any check fails:
 
-```bash
-gh run watch
-```
+1. Fetch failed logs.
+2. Classify transient vs persistent.
+3. For transient errors (timeout, 429, network): retry with backoff.
+4. For persistent errors: implement fix, commit, push.
+5. Re-check CI and continue loop.
 
-If still failing, repeat analysis on new logs.
+Retry budget:
+- transient: up to 5 retries
+- persistent fix cycles: up to 3 per distinct failure class
 
-### 6. Request re-review (if needed)
+### Phase 6: Loop decision
 
-If reviewers requested changes:
+After processing current items:
 
-```bash
-gh pr edit $PR_NUMBER --add-reviewer @reviewer1,@reviewer2
-```
+1. Sleep for at least 300 seconds before the next poll (recommended 300-420 seconds with jitter).
+2. Poll a fresh snapshot.
+3. If new actionable items exist, process them and continue the loop.
+4. If no actionable items exist (including when CI is still pending), keep looping and sleep for the next interval.
 
-## Phase 5: Summarise
+Do not exit just because all checks are green once.
 
-Post a summary comment using [templates/summary.md](templates/summary.md):
+## Follow Reply Quality Rules
 
-```bash
-gh pr comment -b "## PR Feedback Summary
+- Be specific and evidence-based.
+- Mention concrete files and functions when claiming precedent.
+- Keep explanations short, direct, and respectful.
+- Use UK spelling in user-facing text.
+- Use `rg` instead of `grep` for shell-based text search and filtering.
 
-### Review Comments
-- X comments addressed with code changes
-- Y comments resolved with explanations  
-- Z suggestions tracked as new issues
+## Escalate Only as Last Resort
 
-### CI/CD
-- [Status of workflow runs]
+Escalate only if all retries are exhausted:
 
-### Changes Made
-- [List of commits/changes]
+| Condition | Escalate After |
+|-----------|----------------|
+| Same CI class keeps failing | 3 fix attempts |
+| Reviewer conflict with no codebase precedent | present both options once |
+| Security-sensitive disagreement | immediate human review |
 
-All feedback has been addressed."
-```
-
-## Scripts Reference
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/load-pr-feedback.sh` | Fetches PR comments, threads, and CI status |
-| `scripts/resolve-thread.sh` | Resolves a review thread by ID |
-
-## Subagent Usage
-
-Use subagents to parallelize data gathering and offload reply posting.
-
-### Phase 1: Parallel Data Gathering
-
-For PRs with significant feedback, launch 3 agents in parallel to gather all data sources simultaneously:
-
-```
-Launch parallel agents:
-
-1. Review Comments Agent (general-purpose):
-   "Fetch all code review comments for PR #{number} in {owner}/{repo}.
-   Use GraphQL to get review threads with pagination.
-   For each comment, capture:
-   - Thread ID (for resolution)
-   - Comment ID (for replies)
-   - File path and line number
-   - Author
-   - Body text
-   - Resolution status
-   Return: Structured list of all review threads and comments"
-
-2. CI Failures Agent (general-purpose):
-   "Fetch CI/CD status for PR #{number} in {owner}/{repo}.
-   Steps:
-   1. Run: gh pr checks {number}
-   2. For failed checks, get run IDs: gh run list --branch {branch}
-   3. For each failed run, get logs: gh run view {run_id} --log-failed
-   4. Extract error messages and affected files
-   Return: List of failures with error messages, affected files, and suggested fixes"
-
-3. Conversation Agent (general-purpose):
-   "Fetch PR conversation comments for PR #{number} in {owner}/{repo}.
-   Use: gh api repos/{owner}/{repo}/issues/{number}/comments
-   Handle pagination for large discussions.
-   For each comment, capture:
-   - Comment ID
-   - Author
-   - Body text
-   - Created date
-   Return: Chronological list of conversation comments"
-```
-
-**Benefits:**
-- Data gathering 3x faster (concurrent API calls)
-- API rate limits spread across parallel requests
-- Main context receives only structured summaries
-
-### Phase 4: Background Reply Posting
-
-After applying code fixes, offload reply posting to background:
-
-```
-Launch background agent:
-"Post replies to PR #{number} review comments.
-Replies to post:
-[List of {comment_id, reply_text, comment_type}]
-
-For each reply:
-1. If code review comment:
-   gh api repos/{owner}/{repo}/pulls/comments/{id}/replies -f body='...'
-2. If conversation comment:
-   gh pr comment {number} -b '...'
-3. Log success/failure for each
-
-Return: Summary of posted replies with any failures"
-```
-
-```
-Launch background agent:
-"Resolve addressed review threads for PR #{number}.
-Threads to resolve:
-[List of thread IDs]
-
-For each thread:
-1. Run scripts/resolve-thread.sh {thread_id}
-2. Log success/failure
-
-Return: Summary of resolved threads"
-```
-
-Main context can continue working (e.g., creating follow-up issues) while replies post.
-
-**When to use subagents:**
-- PR has > 10 review comments: Use parallel data gathering
-- > 5 replies to post: Use background reply agent
-- CI has multiple failed workflows: Use dedicated CI agent
-
-**When to skip subagents:**
-- Small PR with < 5 comments total
-- Single CI failure to address
-- Quick turnaround needed (subagent overhead not worth it)
-
-### Handling Agent Results
-
-After parallel agents complete, synthesize in main context:
+Escalation message format:
 
 ```markdown
-## Feedback Summary
+## Escalation Required
 
-### From Review Comments Agent:
-- X unresolved threads across Y files
-- Key themes: [categorize by type]
+PR: #$PR_NUMBER
+Reason: [blocker]
 
-### From CI Agent:
-- Z failed workflows
-- Common failures: [test name, lint errors, etc.]
+Attempts made:
+1. ...
+2. ...
+3. ...
 
-### From Conversation Agent:
-- N general comments
-- Unanswered questions: [list]
+Recommended decision:
+[specific choice]
+```
 
-### Overlaps
-- Comment about X and CI failure Y both fixed by: [change]
+## Maintain Output Cadence
+
+Post concise periodic status updates while looping:
+
+```text
+PR=<url>
+LOOP_ITERATION=<n>
+NEW_ITEMS=<count>
+ACTION_TAKEN=fix|explain|follow-up-issue|none
+CI=pass|fail|pending
+```
+
+When the user stops monitoring, provide a final summary of:
+- fixes applied
+- explanations posted
+- follow-up issues created
+- current CI and unresolved-thread state
+
+## Send Completion Notification as Final Step
+
+When monitoring ends (user stops, or PR is merged or closed), after posting the final summary the very last action must be a Telegram notification.
+
+Use `parse_mode: "Markdown"` and include:
+- completion status and reason monitoring ended
+- PR number and URL
+- counts of fixes, explanations, and follow-up issues
+- final CI and unresolved-thread status
+
+Template:
+
+```text
+[PR Feedback Loop Complete]
+
+*PR:* #$PR_NUMBER
+*URL:* $PR_URL
+*Ended because:* <user stopped|merged|closed>
+
+*What was done:*
+- Fixes applied: <count>
+- Explanations posted: <count>
+- Follow-up issues created: <count>
+- Final CI: <pass|fail|pending>
+- Unresolved threads: <count>
 ```
 
 ## Related Skills
 
-- [fix-github-issue](../fix-github-issue/SKILL.md): The workflow that creates the PR
-- [cleanup-issue](../cleanup-issue/SKILL.md): Clean up after PR is merged
+- [generate-issue](../generate-issue/SKILL.md)

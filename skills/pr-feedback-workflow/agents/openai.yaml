@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Feedback Workflow"
+  short_description: "Continuously monitor PR feedback with 5-minute polling"
+  default_prompt: "Use $pr-feedback-workflow to continuously monitor this PR, address new feedback, and keep CI healthy with a 5-minute polling loop until I stop you."

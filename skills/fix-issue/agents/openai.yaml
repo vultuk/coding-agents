@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fix Issue"
+  short_description: "Fix GitHub issues with TDD and local validation"
+  default_prompt: "Use $fix-issue to implement a GitHub issue with TDD, leaving branch/commit/PR steps for manual follow-up."

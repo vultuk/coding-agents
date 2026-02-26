@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Issue"
+  short_description: "Draft and create repository-aware GitHub issues"
+  default_prompt: "Use $generate-issue to draft and create a well-scoped GitHub issue from this request."
