@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Principles Enforcer"
+  short_description: "Strict design-principle compliance enforcement"
+  default_prompt: "Use $design-principles-enforcer to enforce strict software design-principle compliance and produce actionable remediation guidance."

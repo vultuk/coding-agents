@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Best Practices Enforcer"
+  short_description: "Audit Rust code against strict handbook rules"
+  default_prompt: "Use $rust-best-practices-enforcer to analyze this Rust app and enforce the handbook standards."
