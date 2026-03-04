@@ -1,4 +1,4 @@
 interface:
   display_name: "Review Changes"
   short_description: "Produce one high-signal change review summary"
-  default_prompt: "Use $review-changes to analyze the current code diff and output one concise, actionable review in markdown."
+  default_prompt: "Use $review-changes to analyze the current code diff and output one concise, actionable review in markdown, using conservative blocker thresholds and high-confidence evidence."

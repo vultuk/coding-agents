@@ -34,6 +34,13 @@ Review and report in this order:
 4. Performance
 5. Tests and release risk (non-blocking, Tests section only)
 
+## Evidence and Confidence Thresholds
+
+- Mark an item as `Must fix (blocking)` only when confidence is high and production impact is plausible.
+- If confidence is medium/low or evidence is incomplete, downgrade to `Should fix (important)` and state what evidence is missing.
+- Prefer one concise clarification question over speculative blocking claims when key behavior is ambiguous.
+- Limit `Must fix (blocking)` to the top 1-3 highest-impact issues.
+
 ## Review Workflow
 
 1. Collect change intent and scope from the user request and repository context.
@@ -106,3 +113,4 @@ If no meaningful issues are found, output:
 
 - Use `Not approved for merge` if any `Must fix (blocking)` item exists.
 - Otherwise use `Approved for merge` or `Ready to merge` based on context.
+- If findings are only style nits, maintainability suggestions, or non-blocking test gaps, prefer `Approved for merge` or `Ready to merge`.

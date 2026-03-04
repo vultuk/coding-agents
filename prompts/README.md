@@ -10,6 +10,7 @@ This repository contains a set of operational playbooks and prompts for running 
 |------|-------|---------------------|
 | `git-pull-request.md` | Automated PR creation | From unstaged changes, infer a branch name, produce AI-authored commit/PR messaging, push, and open the PR via `gh`. Supports draft PRs. |
 | `push-publish.md` | Release and publish workflow | Decide the next semantic version, update changelog and version metadata, tag and push, create a release, merge the PR, and publish if required. Includes rollback procedures. |
+| `review-changes.md` | Parallel code review adjudication | Run `$review-changes` across N parallel reviewers and aggregate results through an adjudicator into one final review. |
 | `run-prompt.md` | Prompt execution logging | Log prompts to `.prompts/log.md` with metadata before running user instructions. |
 | `wiki-changelog.md` | Wiki changelog automation | Summarise merged PRs per day in plain English, update `Changelog.md` in the GitHub Wiki, and push the changes idempotently. |
 | `fix-github-actions.md` | CI failure resolution | Identify failing workflows, diagnose issues, apply fixes, and verify success. Includes common failure patterns. |
