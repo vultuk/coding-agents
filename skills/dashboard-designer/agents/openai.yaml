@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dashboard Designer"
+  short_description: "Design and refine product dashboards"
+  default_prompt: "Use this skill to design, review, or extend dashboard UI/UX and data visualization."
