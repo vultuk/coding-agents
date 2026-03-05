@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Retrospective"
+  short_description: "Draft and post polished issue retrospectives"
+  default_prompt: "Use $create-retrospective to compile evidence from a major fix and post a polished retrospective discussion in the Retrospectives category."
