@@ -64,3 +64,5 @@ Produce four sections in this order:
 - Keep the skill language-agnostic.
 - Do not enforce Rust-only idioms or compiler-specific rules.
 - When language/runtime differences affect interpretation, enforce intent-equivalent checks rather than syntax-specific checks.
+- Framework-specific checks are allowed when they operationalize a general principle.
+  - For React UI work, treat matching Storybook stories for newly created components as required self-documenting evidence.

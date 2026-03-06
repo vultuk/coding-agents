@@ -204,13 +204,16 @@ Required evidence:
 Pass checks:
 - Encode intent through names, types, boundaries, and local invariants.
 - Keep critical usage expectations in module interfaces or nearby docs.
+- For newly created React components, provide appropriate Storybook stories covering the primary states and intended usage.
 
 Fail indicators:
 - Opaque naming requiring external tribal knowledge.
 - Hidden assumptions not discoverable from module/interface context.
+- Newly created React components ship without matching Storybook stories, or the stories omit core states needed to understand intended behavior.
 
 Required evidence:
 - Example where behavior cannot be inferred from local code/interface.
+- Component-to-story mapping and any missing state coverage for newly created React components.
 
 ### 16. Uniform Access
 
