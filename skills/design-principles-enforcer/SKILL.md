@@ -37,6 +37,7 @@ Use [references/design-principles-matrix.md](references/design-principles-matrix
   - Example: mark LSP/ISP as `N/A` when no inheritance or interface hierarchy exists.
 - Require evidence for every judgment.
   - Include file paths, affected symbols, and behavioral impact.
+- Label assumptions explicitly when architectural intent is unclear.
 - Reject hand-wavy conclusions.
   - Replace vague language ("could be cleaner") with objective failure criteria.
 - Prefer behavior-preserving fixes first.

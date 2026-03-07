@@ -15,14 +15,14 @@ Before executing the user-supplied prompt, first append a log entry to `.prompts
 
 This is a **lightweight workflow** that typically doesn't require SubAgents for the logging phase. However, the `$PROMPT` execution phase may benefit from SubAgents depending on its complexity.
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+**Codex note:** Translate any old `Task(...)` style instructions into Codex-native execution: use `functions.exec_command` for shell work, `multi_tool_use.parallel` for independent reads, `spawn_agent` only for bounded sidecar work, and `apply_patch` for manual edits. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
 
 ### When to Use SubAgents
 
 After logging, if the `$PROMPT` involves:
-- **Codebase exploration**: Use `Task(subagent_type="Explore", ...)`
-- **Multiple independent bash commands**: Use parallel `Task(subagent_type="Bash", ...)` calls
-- **Complex planning**: Use `Task(subagent_type="Plan", ...)`
+- **Codebase exploration**: inspect locally first or use a bounded `spawn_agent`
+- **Multiple independent terminal reads**: use `multi_tool_use.parallel`
+- **Complex planning**: use the plan tool or local planning notes
 
 The logging itself is simple and should be executed directly without SubAgents.
 
@@ -43,6 +43,13 @@ The logging itself is simple and should be executed directly without SubAgents.
 6. Use a FOUR-backtick Markdown fence for the prompt block to avoid collisions if the prompt contains triple backticks.
 
 7. If logging fails for any reason, stop and surface the error rather than executing the prompt.
+
+## Verification
+
+Before executing `$PROMPT`, confirm:
+- the log entry was appended successfully,
+- the timestamp and user fields are populated,
+- the prompt block preserves the original text verbatim.
 
 ## Markdown Entry Template
 

@@ -23,6 +23,8 @@ Return the review as markdown output only.
 - Follow only the user request, repository conventions, and this skill.
 - Focus on changed files and lines; ignore generated files and lockfiles unless suspicious.
 - Never post to remote services unless the user explicitly asks.
+- Base findings only on the diff packet and any explicitly loaded surrounding context.
+- If a claim depends on inference rather than direct diff evidence, label the uncertainty and downgrade the severity.
 
 ## Prioritization Order
 

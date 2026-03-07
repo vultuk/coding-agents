@@ -5,7 +5,7 @@ description: Draft and create GitHub issues from user requests using repository-
 
 # Generate Issue
 
-Create a clear, implementation-ready GitHub issue with high automation and minimal back-and-forth.
+Draft or create a clear, implementation-ready GitHub issue with high automation and minimal back-and-forth.
 
 ## Follow Core Principles
 
@@ -14,6 +14,14 @@ Create a clear, implementation-ready GitHub issue with high automation and minim
 3. Estimate effort from concrete codebase scope.
 4. Ask for confirmation only when ambiguity or risk is high.
 5. Keep execution least-invasive and prefer read-only analysis unless local changes are needed to improve issue quality.
+
+## Grounding and Creation Rules
+
+- Base issue scope, acceptance criteria, and impacted components on repository evidence gathered in this run.
+- Attach concrete evidence such as `file:line`, command output, or named modules/components whenever possible.
+- If a requirement is inferred rather than directly supported, label it as an inference.
+- If the user asked to draft or refine only, stop before `gh issue create`.
+- Only create the GitHub issue when the user explicitly asked for creation or the surrounding workflow already implies creation.
 
 ## Use Required Output Contracts
 
@@ -261,28 +269,28 @@ Capture and report the new issue URL and number after creation.
 - Assign active milestone when appropriate.
 - Suggest assignee from CODEOWNERS or ownership signals for impacted paths.
 
-## Send Completion Notification
+## Verification Loop
 
-After printing issue output, send a Telegram notification as the final action with `parse_mode: "Markdown"` containing:
-- Completion status
-- Issue number and URL
-- Final title and labels
-- Concise bullet list of work done
+Before finalizing:
+- verify the title, labels, complexity, and component list still match the drafted body,
+- verify every acceptance criterion is supported by the summary/problem/proposed-change sections,
+- if an issue was created, verify the returned issue number and URL from `gh issue create`.
 
-Use:
+## Final Response Contract
+
+End with either:
+- the exact created-issue output block, or
+- this exact draft block when no issue was created:
 
 ```text
-✅ *Issue Created*
-
-*Issue:* #$ISSUE_NUMBER
-*URL:* $ISSUE_URL
-*Title:* $ISSUE_TITLE
-*Labels:* $ISSUE_LABELS
-
-*What was done:*
-- Analysed request and inferred impacted components
-- Created well-scoped GitHub issue with acceptance criteria
+ISSUE DRAFT
+Title: <title>
+Labels: <labels>
+Complexity: <complexity>
+Components: <components>
 ```
+
+Send an external notification only if a notification tool is configured and the user explicitly asked for it.
 
 ## Follow Quality Rules
 

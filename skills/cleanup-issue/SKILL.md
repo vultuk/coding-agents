@@ -20,6 +20,11 @@ arguments:
 
 Finalise and clean up after an issue is complete.
 
+## Verification Rules
+
+- Before merging or deleting anything, verify the PR state, branch name, and worktree path match the target issue.
+- After cleanup, verify the branch/worktree is removed and the base branch is updated successfully.
+
 ## Workflow
 
 ### 1. Merge PR (if not already merged)
@@ -51,8 +56,7 @@ The script provides helpful information when the PR cannot be merged:
 
 After cleanup completes successfully:
 
-- **Claude Code:** output `/new` to start a fresh session.
-- **Codex:** say "Ready for next task."
+- Report that cleanup completed and that the repository is back in a safe ready state for the next task.
 
 ## Manual Steps
 
@@ -87,5 +91,5 @@ git worktree prune
 
 ## Related Skills
 
-- [fix-github-issue](../fix-github-issue/SKILL.md): The workflow that creates the issue branch and PR
+- [fix-issue](../fix-issue/SKILL.md): Single-issue implementation with local validation
 - [pr-feedback-workflow](../pr-feedback-workflow/SKILL.md): Address review comments before cleanup

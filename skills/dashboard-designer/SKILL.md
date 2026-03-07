@@ -59,6 +59,11 @@ Treat those local files as the skill's source of truth. Do not depend on remote 
 - Map each change to a dashboard principle from the embedded playbook.
 - Flag any unresolved tradeoffs.
 
+## Completion Contract
+
+- Treat the task as incomplete until the changed dashboard elements, states, and validation checks are all covered or explicitly `[blocked]`.
+- Before finalizing, verify that each new or changed widget answers one clear question and that its placement still matches the surrounding information hierarchy.
+
 ## Widget Addition Protocol
 
 When asked to add a widget, always define these fields before implementation:

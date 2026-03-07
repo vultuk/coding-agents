@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prompt Optimizer"
+  short_description: "Rewrite rough prompts into GPT-5.4-style prompts"
+  default_prompt: "Use $prompt-optimizer to turn this rough task description into a stronger prompt with explicit output, grounding, tool, and completion contracts."

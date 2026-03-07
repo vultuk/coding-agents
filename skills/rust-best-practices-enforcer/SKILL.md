@@ -38,6 +38,7 @@ Use this skill to perform repeatable Rust best-practices audits and produce fixe
 - Treat design-principles guidance in `chapter_10_design_principles.md` as mandatory manual review checkpoints during every audit.
 - Prefer code changes over lint suppression. If suppression is unavoidable, require `#[expect(...)]` with an explicit reason.
 - Preserve project semantics; do not perform mechanical rewrites that alter API contracts without explicit justification.
+- Treat the task as incomplete until checker output, handbook review, and post-edit validation have all been run or explicitly marked `[blocked]`.
 
 ## Chapter Loading Strategy
 

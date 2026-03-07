@@ -25,7 +25,15 @@ arguments:
 
 Perform comprehensive code audits and generate structured markdown reports.
 
-**Codex note:** This skill references Claude Code subagents (`Task(...)`). In Codex, run the equivalent steps with tool calls (for example `functions.shell_command` and `multi_tool_use.parallel`) or run them sequentially. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+**Codex note:** Translate old `Task(...)` references into Codex-native execution: `functions.exec_command` for shell work, `multi_tool_use.parallel` for independent reads, `spawn_agent` for bounded sidecar analysis, and `apply_patch` for manual edits. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+
+## Grounding and Side-Effect Rules
+
+- Every finding must be backed by concrete code evidence, not style preference alone.
+- If a claim is an inference rather than a directly observed fact, label it as an inference.
+- Default to producing the audit report first.
+- Create GitHub issues only when the user explicitly asked for issue creation or the surrounding workflow already implies it.
+- Before creating issues, deduplicate overlapping findings and verify each issue body still matches the final report wording.
 
 ## Workflow
 
@@ -33,7 +41,7 @@ Perform comprehensive code audits and generate structured markdown reports.
 2. **Discovery**: List and categorise source files
 3. **Analysis**: Evaluate each category systematically
 4. **Report**: Generate markdown report using template format
-5. **GitHub Issues**: Create issues using `scripts/create_issue.sh`:
+5. **GitHub Issues (optional)**: When requested, create issues using `scripts/create_issue.sh`:
    - First: Create individual issues for each actionable recommendation
    - Then: Create the full audit report with subtasks linking to each issue
 
@@ -127,7 +135,11 @@ Key formatting rules:
 
 ## Output
 
-### Step 1: Create Individual Recommendation Issues
+### Step 1: Produce the Audit Report
+
+Always produce the full markdown audit report first using the template in [references/report-template.md](references/report-template.md).
+
+### Step 2: Create Individual Recommendation Issues (only when requested)
 
 For each actionable recommendation, create a separate issue using the format in [references/issue-template.md](references/issue-template.md). Capture the returned issue URL for each.
 
@@ -149,7 +161,7 @@ Category labels (use as appropriate):
 - `security`, `performance`, `bug`, `technical-debt`
 - `architecture`, `observability`, `testing`, `documentation`
 
-### Step 2: Create Full Audit Report with Subtasks
+### Step 3: Create Full Audit Report with Subtasks (only when requested)
 
 Append a "Related Issues" section to the full report with subtasks linking to each individual issue:
 
@@ -181,7 +193,7 @@ Create separate audit reports when:
 - Findings span multiple priority levels with different timelines
 - The report exceeds ~500 lines (becomes hard to track)
 
-Confirm all issue URLs with the user after creation.
+If issues were created, confirm all issue URLs with the user after creation.
 
 ## Subagent Usage
 
@@ -236,7 +248,7 @@ Each agent returns structured findings. Main context synthesizes into final repo
 - Exploration output stays in subagent context (reduces token usage)
 - Main context receives only synthesized findings
 
-### Phase 5: Background Issue Creation
+### Phase 5: Background Issue Creation (optional)
 
 After generating the report, create GitHub issues in background:
 
@@ -267,4 +279,4 @@ Main context can continue summarizing results while issues are created.
 ## Related Skills
 
 - [race-condition-audit](../race-condition-audit/SKILL.md): Deep-dive on concurrency issues
-- [fix-github-issue](../fix-github-issue/SKILL.md): Implement fixes from audit recommendations
+- [fix-issue](../fix-issue/SKILL.md): Implement fixes from audit recommendations

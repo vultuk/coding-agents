@@ -52,7 +52,7 @@ Fully autonomous GitHub issue lifecycle automation with TDD implementation.
 
 ## Overview
 
-**Codex note:** This skill references Claude Code subagents (`Task(...)`). In Codex, run the equivalent steps with tool calls (for example `functions.shell_command` and `multi_tool_use.parallel`) or run them sequentially. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+**Codex note:** This skill references Claude Code subagents (`Task(...)`). In Codex, translate those steps into `functions.exec_command`, `multi_tool_use.parallel`, `spawn_agent`, and `apply_patch` as appropriate. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
 
 This skill runs completely autonomously:
 1. Fetches and prioritizes all open issues
@@ -64,6 +64,12 @@ This skill runs completely autonomously:
 
 **Workflow**: PRs are created immediately to trigger CI and review requests. The skill monitors feedback and addresses it autonomously. When complete, it tags the user for final review and merge.
 
+## Grounding and Completion Rules
+
+- Base prioritisation, implementation, and review responses only on repository evidence, GitHub data, and command output gathered in this run.
+- Treat the workflow as incomplete until issue selection, implementation, PR state, CI state, and review state are all resolved or explicitly `[blocked]`.
+- Before any irreversible or external action, verify the current issue number, branch, and PR target still match the selected work item.
+
 ---
 
 ## Single Issue Mode
@@ -73,9 +79,6 @@ When `ISSUE_NUMBER` is provided, the skill skips the discovery and prioritizatio
 ```bash
 # Example: Fix only issue #1198
 /auto-issue-fixer --issue-number 1198
-
-# Or use the dedicated command
-/fix-issue 1198
 ```
 
 **Behavior changes in single issue mode:**
@@ -258,10 +261,11 @@ This ensures we're working with the latest codebase and avoids merge conflicts l
 
 ### 2.2 Create Worktree
 
-Use the existing worktree setup script:
+Create an isolated worktree directly if no dedicated helper script exists:
 
 ```bash
-../fix-github-issue/scripts/setup-worktree.sh $ISSUE_NUMBER
+git fetch origin
+git worktree add -b "issue-$ISSUE_NUMBER" ".worktrees/issue-$ISSUE_NUMBER" origin/main
 ```
 
 This creates an isolated worktree at `.worktrees/issue-$ISSUE_NUMBER`.
@@ -279,7 +283,7 @@ This prevents other runs from picking up the same issue and signals to humans th
 ### 2.4 Load Issue Context
 
 ```bash
-../fix-github-issue/scripts/load-issue.sh $ISSUE_NUMBER
+gh issue view "$ISSUE_NUMBER" --json number,title,body,labels,assignees,comments,url
 ```
 
 ### 2.5 Create TDD Plan
@@ -1159,9 +1163,9 @@ Escalation message:
 **Reused from other skills**:
 | Script | Source |
 |--------|--------|
-| `setup-worktree.sh` | fix-github-issue |
-| `load-issue.sh` | fix-github-issue |
-| `create-pr.sh` | fix-github-issue |
+| `setup-worktree.sh` | use direct `git worktree add` flow if helper is unavailable |
+| `load-issue.sh` | use direct `gh issue view` flow if helper is unavailable |
+| `create-pr.sh` | use direct `gh pr create` flow if helper is unavailable |
 | `load-pr-feedback.sh` | pr-feedback-workflow |
 | `resolve-thread.sh` | pr-feedback-workflow |
 
@@ -1187,9 +1191,6 @@ Escalation message:
 # Fix a specific issue by number
 /auto-issue-fixer --issue-number 1198
 
-# Or use the dedicated slash command
-/fix-issue 1198
-
 # Fix the highest-priority issue (leaves PR for human to merge)
 /auto-issue-fixer
 
@@ -1209,7 +1210,7 @@ Escalation message:
 /auto-issue-fixer --auto-merge --bot-wait-minutes 7 --quiet-period-minutes 5
 
 # Fix specific issue with auto-merge
-/fix-issue 1198 --auto-merge
+/auto-issue-fixer --issue-number 1198 --auto-merge
 ```
 
 **Auto-merge behavior:**
@@ -1220,6 +1221,6 @@ Escalation message:
 
 ## Related Skills
 
-- [fix-github-issue](../fix-github-issue/SKILL.md): Manual issue fixing with worktrees
+- [fix-issue](../fix-issue/SKILL.md): Single-issue implementation with local validation
 - [pr-feedback-workflow](../pr-feedback-workflow/SKILL.md): Dedicated PR feedback handling
 - [cleanup-issue](../cleanup-issue/SKILL.md): Post-merge cleanup

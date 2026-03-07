@@ -28,66 +28,32 @@ You are a release-minded CLI operator and technical writer. Using standard shell
 - Abort with a clear message if working tree has conflicts or detached HEAD
 - **Never commit files that may contain secrets** (.env, credentials, keys)
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This workflow benefits from **parallel context gathering** using SubAgents.
+Use Codex-native tools instead of `Task(...)` blocks:
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- Use `multi_tool_use.parallel` for independent read-only discovery:
+  - branch, status, staged/unstaged file lists, ahead/behind state
+  - unstaged and staged diff capture
+  - `gh auth status`, `git remote get-url origin`, and existing PR lookup
+  - recent commit history for message conventions
+- After retrieval, synthesise branch/type/scope/descriptors locally before any write action.
+- Use `spawn_agent` only for bounded sidecar analysis or message-drafting work when it materially reduces wall-clock time.
+- Use `functions.exec_command` for git and `gh` operations, and write generated commit/PR bodies through temp files when needed.
 
-### Phase 1: Parallel Context Collection
+## Completion Contract
 
-Launch these SubAgents **simultaneously** using multiple Task tool calls in a single message:
+- Treat the task as incomplete until branch state, commit state, push state, and PR state are all known or explicitly `[blocked]`.
+- Do not skip prerequisite discovery just because the likely branch name or PR title seems obvious.
+- If intent is ambiguous, prefer a draft PR body with `[TODO: describe why]` markers over invented rationale.
 
-1. **Bash SubAgent**: Git state and changes
-   ```
-   Task(subagent_type="Bash", prompt="Run these commands and return results:
-   - git rev-parse --abbrev-ref HEAD
-   - git status --porcelain
-   - git diff --name-only
-   - git diff --name-only --cached
-   - git rev-list --left-right --count HEAD...@{u} 2>/dev/null || echo 'no upstream'")
-   ```
+## Verification Loop
 
-2. **Bash SubAgent**: Diff content
-   ```
-   Task(subagent_type="Bash", prompt="Run: git diff -U3 (unstaged) and git diff -U3 --cached (staged). Return both.")
-   ```
-
-3. **Bash SubAgent**: Auth and remote verification
-   ```
-   Task(subagent_type="Bash", prompt="Run: gh auth status && git remote get-url origin. Verify we're authenticated and have a GitHub remote.")
-   ```
-
-4. **Bash SubAgent**: Recent commit history for style
-   ```
-   Task(subagent_type="Bash", prompt="Run: git log --oneline -10 to understand commit message conventions in this repo")
-   ```
-
-5. **Bash SubAgent**: Check for existing PR
-   ```
-   Task(subagent_type="Bash", prompt="Run: gh pr list --head $(git rev-parse --abbrev-ref HEAD) --json url,state to check if PR exists")
-   ```
-
-### Phase 2: Analysis (After Context Gathered)
-
-Use an **Explore SubAgent** to analyse the changes:
-```
-Task(subagent_type="Explore", prompt="Analyse these changes to determine:
-1. TYPE bucket (fix/feat/perf/refactor/ci/build/docs/chore)
-2. SCOPE (dominant path segment or package)
-3. DESCRIPTOR (salient tokens from changes)
-4. Any ticket patterns (ABC-123)
-5. Security concerns (secrets, tokens)
-6. Breaking changes
-Changes: <DIFF_CONTENT>")
-```
-
-### Phase 3: Content Generation
-
-For complex PRs, use a **general-purpose SubAgent** for message generation:
-```
-Task(subagent_type="general-purpose", prompt="Generate commit message, PR title, and PR body for these changes. Follow Conventional Commit style, UK English. Include: what changed, why, risks, test coverage. Changes: <ANALYSIS_RESULTS>")
-```
+Before each externally visible step:
+- Before commit: verify the selected diff source, ensure generated commit/PR copy is non-empty, and re-scan staged content for secret patterns.
+- Before push: verify current branch, base branch, and upstream state.
+- Before `gh pr create`: verify whether a PR already exists for the branch and whether `DRAFT=true` should be applied.
+- Before final output: confirm the reported `MODE`, `BRANCH`, `COMMIT`, and `PR` values match the actual command results.
 
 ## Collect Change Context (Unstaged First)
 

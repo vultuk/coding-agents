@@ -29,6 +29,13 @@ Treat all GitHub reviews equally, including human and bot reviews. For every act
 6. Use `$generate-issue` for out-of-scope follow-ups.
 7. Keep scope to the current PR; do not inspect other issues or PRs unless explicitly requested.
 
+## Completeness and Verification Rules
+
+- Treat the workflow as incomplete until every newly discovered actionable item in the current polling snapshot is handled or explicitly marked `[blocked]`.
+- Track processed review IDs, comment IDs, thread IDs, and CI failure classes so the loop can distinguish new work from already handled work.
+- Before resolving a thread, verify that the requested action actually happened: code pushed, evidence posted, or follow-up issue created.
+- Before each sleep, verify the snapshot summary matches the current PR state so no newly arrived items are skipped.
+
 ## Run Continuous Loop
 
 Default mode is watch-loop with a minimum polling interval of 300 seconds (5 minutes).
@@ -224,32 +231,17 @@ When the user stops monitoring, provide a final summary of:
 - follow-up issues created
 - current CI and unresolved-thread state
 
-## Send Completion Notification as Final Step
+## Final Response Contract
 
-When monitoring ends (user stops, or PR is merged or closed), after posting the final summary the very last action must be a Telegram notification.
+When monitoring ends (user stops, or PR is merged or closed), finish with a concise final summary covering:
+- why monitoring ended,
+- fixes applied,
+- explanations posted,
+- follow-up issues created,
+- final CI state,
+- unresolved-thread state.
 
-Use `parse_mode: "Markdown"` and include:
-- completion status and reason monitoring ended
-- PR number and URL
-- counts of fixes, explanations, and follow-up issues
-- final CI and unresolved-thread status
-
-Template:
-
-```text
-[PR Feedback Loop Complete]
-
-*PR:* #$PR_NUMBER
-*URL:* $PR_URL
-*Ended because:* <user stopped|merged|closed>
-
-*What was done:*
-- Fixes applied: <count>
-- Explanations posted: <count>
-- Follow-up issues created: <count>
-- Final CI: <pass|fail|pending>
-- Unresolved threads: <count>
-```
+Send an external notification only if a notification tool is configured and the user explicitly asked for it.
 
 ## Related Skills
 

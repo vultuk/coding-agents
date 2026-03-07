@@ -14,9 +14,8 @@ This repository contains a set of operational playbooks and prompts for running 
 | `run-prompt.md` | Prompt execution logging | Log prompts to `.prompts/log.md` with metadata before running user instructions. |
 | `wiki-changelog.md` | Wiki changelog automation | Summarise merged PRs per day in plain English, update `Changelog.md` in the GitHub Wiki, and push the changes idempotently. |
 | `fix-github-actions.md` | CI failure resolution | Identify failing workflows, diagnose issues, apply fixes, and verify success. Includes common failure patterns. |
-| `generate-issue.md` | Issue creation | Create well-documented GitHub issues from provided details with proper labels and acceptance criteria. |
 | `setup-project.md` | Project scaffolding | Set up a production-ready monorepo with Nx, Expo, Next.js, Hono, and supporting infrastructure. |
-| `suggest-github-issues.md` | Codebase analysis | Analyse codebase and create issues for security fixes, code quality improvements, and system enhancements. |
+| `suggest-github-issues.md` | Codebase analysis | Analyse codebase and draft or create evidence-backed issues for security fixes, code quality improvements, and system enhancements. |
 
 ## Prompt Format
 
@@ -40,17 +39,19 @@ Arguments marked as `required: true` must always be provided when using the prom
 - Treat each file as an authoritative SOP: follow the sequence, guardrails, and reporting expectations it outlines.
 - Many prompts assume access to standard tooling such as Git, the GitHub CLI (`gh`), and project-specific scripts; ensure you meet the prerequisites before execution.
 - Maintain professionalism and accuracy - most instructions target high-scrutiny workflows like release management or executive reporting.
-- For Codex CLI vs Claude Code differences (subagents, headless execution), see [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- For Codex CLI vs Claude Code differences (subagents, shell/edit tools, verification expectations), see [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- Prefer prompts with explicit completion criteria, verification steps, and exact output contracts. GPT-5.4-style workflows are more reliable when "done" is defined directly in the prompt.
 
 ## Related Skills
 
 For more complex, multi-phase workflows, see the [skills repository](../skills/README.md):
 
-- `fix-github-issue`: Full issue-to-PR workflow with worktrees
+- `fix-issue`: Single-issue implementation with strict local TDD and manual git/PR handoff
 - `pr-feedback-workflow`: Process PR review comments and CI failures
 - `cleanup-issue`: Post-merge cleanup
 - `code-audit`: Comprehensive code auditing with reports
 - `race-condition-audit`: Concurrency bug detection
+- `generate-issue`: Draft or create implementation-ready GitHub issues
 
 ## Extending The Library
 
@@ -62,5 +63,6 @@ When adding new prompts:
 4. Describe the expected deliverables so operators can validate their work quickly
 5. Include error handling and edge cases
 6. Add cross-references to related prompts or skills
+7. Make completion, verification, and any side-effect boundaries explicit
 
 By following these guidelines, contributors can continue to grow a reliable reference set for complex operational tasks.

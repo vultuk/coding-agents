@@ -23,59 +23,29 @@ You are an expert project manager with 25 years of experience translating betwee
 - **WORKDIR:** a temporary folder
 - **Style:** 1 short paragraph per date, plain English for non-technical readers; no PR numbers; themes > minutiae; mention user-visible impacts when possible
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This workflow benefits from parallel operations in the setup and summarisation phases.
+- Use `functions.exec_command` for `gh`, git, and filesystem operations.
+- Use `multi_tool_use.parallel` for independent setup work:
+  - `gh auth status`
+  - wiki clone/setup
+  - merged PR retrieval
+- After grouping PRs by date, you may use bounded sidecar summarisation work only when there are many dates to cover; otherwise summarise locally.
+- Keep the final wiki edit, commit, and push sequential to avoid conflicts.
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+## Completion Contract
 
-### Phase 1: Parallel Setup
+- Treat the task as incomplete until every merged PR after `CUTOFF` has either been assigned to a date section or explicitly marked `[blocked]`.
+- Do not stop at the first page of PR results if more pages may exist.
+- Never duplicate an existing `## YYYY-MM-DD` section.
 
-Launch these SubAgents **simultaneously**:
+## Verification Loop
 
-```
-# Launch in a single message with multiple Task calls:
-
-Task(subagent_type="Bash", prompt="Verify gh auth status has repo scope. Return auth status and any errors.")
-
-Task(subagent_type="Bash", prompt="Clone the wiki repository:
-gh repo clone $REPO.wiki /tmp/wiki-changelog-workdir/wiki
-Return: success/failure and path to cloned wiki")
-
-Task(subagent_type="Bash", prompt="Fetch merged PRs from $REPO:
-gh pr list --repo $REPO --state merged --limit 200 --json number,title,body,mergedAt,author,labels
-Return: JSON array of merged PRs")
-```
-
-### Phase 2: Parallel Date Summarisation
-
-When multiple dates have PRs to summarise, launch **parallel summarisation SubAgents**:
-
-```
-# For each date with merged PRs, launch in parallel:
-
-Task(subagent_type="general-purpose", prompt="Summarise these PRs merged on 2024-01-15 into a single paragraph for non-technical readers:
-PRs: <LIST_OF_PR_TITLES_AND_BODIES>
-Style: Plain English, focus on user-visible impacts, no PR numbers, themes over details.
-Example: 'Polished onboarding with clearer error handling, trimmed API latency on order flow.'", model="haiku")
-
-Task(subagent_type="general-purpose", prompt="Summarise these PRs merged on 2024-01-14 into a single paragraph for non-technical readers:
-PRs: <LIST_OF_PR_TITLES_AND_BODIES>
-Style: Plain English, focus on user-visible impacts, no PR numbers, themes over details.", model="haiku")
-
-# ... repeat for each date
-```
-
-### Phase 3: Sequential Commit
-
-The final commit and push must be sequential to avoid conflicts:
-```
-Task(subagent_type="Bash", prompt="In /tmp/wiki-changelog-workdir/wiki:
-1. Update Changelog.md with new date sections (newest first)
-2. git add Changelog.md
-3. git commit -m 'chore(changelog): update for YYYY-MM-DD to YYYY-MM-DD'
-4. git push (retry once with pull --rebase if rejected)")
-```
+Before pushing:
+- verify date grouping uses the requested timezone,
+- verify each new date section is inserted newest-first exactly once,
+- verify `Changelog.md` remains valid markdown and only intended sections changed,
+- confirm the final commit range matches the dates added.
 
 ## Setup
 

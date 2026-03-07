@@ -20,56 +20,34 @@ Using the gh command, identify and fix any failing GitHub Actions workflows for 
 - Git repository with GitHub remote
 - Write access to push fixes
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This workflow benefits from parallel SubAgent execution. Use the Task tool with these patterns:
+Translate the old subagent plan into Codex-native phases:
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- Use `multi_tool_use.parallel` for independent discovery:
+  - latest failing run lookup
+  - current git state
+  - workflow-file inventory under `.github/workflows/`
+- Once `RUN_ID` is known, use `multi_tool_use.parallel` again for:
+  - full log retrieval
+  - targeted codebase searches for affected files/config
+  - any bounded sidecar analysis that classifies the failure type and root cause
+- Use `functions.update_plan` for a short fix plan when the failure spans multiple files or systems.
+- Use `functions.exec_command` for all `gh`, git, test, and build commands, and `apply_patch` for manual edits.
 
-### Parallel Initial Analysis (Phase 1)
+## Completion Contract
 
-Launch these SubAgents **in parallel** at the start:
+- Treat the task as incomplete until the failing workflow is either passing, re-run and still failing with a documented blocker, or explicitly `[blocked]`.
+- Do not stop after diagnosing the first symptom if the root cause has not been verified locally.
+- Keep a retry checklist per failure class so repeated failures are tracked rather than rediscovered.
 
-1. **Bash SubAgent**: Fetch failing run details
-   ```
-   Task(subagent_type="Bash", prompt="Run: gh run list --limit 10 --json databaseId,name,conclusion,headSha,headBranch and identify the most recent failure")
-   ```
+## Verification Loop
 
-2. **Bash SubAgent**: Check current git status
-   ```
-   Task(subagent_type="Bash", prompt="Run git status and git branch to understand current state")
-   ```
-
-3. **Explore SubAgent**: Survey workflow files
-   ```
-   Task(subagent_type="Explore", prompt="Find all GitHub Actions workflow files in .github/workflows/ and summarise their purposes")
-   ```
-
-### Parallel Diagnosis (Phase 2)
-
-Once you have the failing run ID, launch **in parallel**:
-
-1. **Bash SubAgent**: Fetch full logs
-   ```
-   Task(subagent_type="Bash", prompt="Run: gh run view <RUN_ID> --log and save to action_failure.log")
-   ```
-
-2. **Explore SubAgent**: Analyse error patterns
-   ```
-   Task(subagent_type="Explore", prompt="Read action_failure.log and identify: 1) Error type (build/lint/type/test), 2) Affected files, 3) Root cause")
-   ```
-
-3. **Explore SubAgent**: Search codebase for related issues
-   ```
-   Task(subagent_type="Explore", prompt="Based on the error in <ERROR_SUMMARY>, search the codebase for related files and potential fixes")
-   ```
-
-### Fix Implementation (Phase 3)
-
-For complex fixes, use a **Plan SubAgent** first:
-```
-Task(subagent_type="Plan", prompt="Plan the fix for CI failure: <ERROR_DETAILS>. Consider: affected files, test implications, minimal change approach")
-```
+Before finalizing:
+- verify the fix addresses the failure class seen in the retrieved logs,
+- run the narrowest meaningful local validation before pushing,
+- confirm the re-run workflow result or the exact blocked state,
+- include any remaining gaps if local and remote validation differ.
 
 ## Workflow
 
@@ -135,12 +113,12 @@ gh workflow run <WORKFLOW_NAME> --ref <BRANCH_NAME>
 
 ### 5. Report progress
 
-Post a summary comment on the relevant PR (if applicable):
+If the user explicitly asked for a PR update, post a summary comment on the relevant PR:
 ```bash
 gh pr comment <PR_NUMBER> -b "<summary_of_fix>"
 ```
 
-Include:
+Otherwise, include the same summary in the final response only:
 - The error identified
 - The exact change implemented
 - Confirmation that the workflow re-run has passed (or next steps if still failing)

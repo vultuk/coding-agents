@@ -7,6 +7,14 @@ description: Create polished incident retrospectives and publish them to GitHub 
 
 Generate a factual retrospective post from concrete evidence and publish it in the `Retrospectives` discussion category.
 
+## Grounding and Publishing Rules
+
+- Base the retrospective only on evidence gathered in this run.
+- Do not invent commands, timestamps, review decisions, or causal links.
+- If a conclusion is an inference, label it as an inference.
+- If the user asked for a draft only, stop before posting.
+- If posting is requested or clearly implied, run a short pre-flight summary before publishing and verify the returned discussion URL afterward.
+
 ## Workflow
 
 ### 1. Establish scope

@@ -31,88 +31,43 @@ You are a senior full-stack engineer. Set up a fresh, production-ready monorepo 
 - **Hosting:** Railway
 - **Tiny helpers allowed:** zod, @hono/zod-validator, hono/secure-headers, @hono-rate-limiter (+ redis store)
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This large scaffolding workflow benefits significantly from **parallel SubAgent execution**. Structure the work in phases:
+Run this scaffold in dependency-aware phases:
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+1. Sequential foundation:
+   - git init / remote setup
+   - Nx workspace creation
+   - root TypeScript, lint, and workspace config
+2. Parallel app and library generation:
+   - after the workspace exists, use `multi_tool_use.parallel` for independent generators or file creation tasks
+   - keep shared contracts (path aliases, env schema, build tooling) coordinated in the main run
+3. Parallel infra/documentation:
+   - generate Docker, CI, env examples, and docs after app/library shapes are known
+4. Sequential verification:
+   - install deps, run validation commands, and fix scaffold breakages before declaring success
 
-### Phase 1: Sequential Foundation
-
-These must run sequentially as they have dependencies:
-1. Git init and first commit (Bash)
-2. Nx workspace creation (Bash)
-3. Base configuration (tsconfig, nx.json)
-
-### Phase 2: Parallel App Scaffolding
-
-After Nx workspace exists, launch **all app generators in parallel**:
-
-```
-# Launch simultaneously in a single message with multiple Task calls:
-
-Task(subagent_type="Bash", prompt="In the Nx workspace, generate the Expo mobile app:
-npx nx g @nx/expo:application mobile --directory=apps/mobile --e2eTestRunner=none
-Configure Clerk Expo integration with SecureStore token cache.")
-
-Task(subagent_type="Bash", prompt="In the Nx workspace, generate the Next.js web app:
-npx nx g @nx/next:application web --directory=apps/web --appDir=true
-Add @clerk/nextjs, create middleware.ts with clerkMiddleware, add /api/health route.")
-
-Task(subagent_type="Bash", prompt="In the Nx workspace, create the Hono API app:
-mkdir -p apps/api/src && create index.ts with Hono routes: /health, /version, /user/me
-Configure Bun runtime, CORS, rate-limiting, JWK auth middleware.")
-```
-
-### Phase 3: Parallel Library Creation
-
-Launch **all shared libs in parallel**:
-
-```
-# Launch simultaneously:
-
-Task(subagent_type="Bash", prompt="Create libs/shared/ui with cross-platform React components using NativeWind/Tailwind")
-
-Task(subagent_type="Bash", prompt="Create libs/shared/utils with logger, env validation (zod), and helper functions")
-
-Task(subagent_type="Bash", prompt="Create libs/shared/config with eslint, prettier, tailwind, and postcss configs")
-
-Task(subagent_type="Bash", prompt="Create libs/shared/db with Drizzle ORM setup, postgres.js driver, schema folder, and migration helpers")
-
-Task(subagent_type="Bash", prompt="Create libs/shared/sdk with Redis adapter (ioredis), Resend client, React Email templates, and typed Hono API client")
-```
-
-### Phase 4: Parallel Infrastructure Files
-
-Launch **all config/infra files in parallel**:
-
-```
-# Launch simultaneously:
-
-Task(subagent_type="general-purpose", prompt="Create docker-compose.yml with: postgres:16-alpine, redis:7-alpine, migrate container, api, web, and optional mailpit services")
-
-Task(subagent_type="general-purpose", prompt="Create Dockerfile for apps/api (Bun-based, multi-stage) and apps/web (Node-based Next.js, multi-stage)")
-
-Task(subagent_type="general-purpose", prompt="Create railway.json with deploy configuration for web and api apps")
-
-Task(subagent_type="general-purpose", prompt="Create .github/workflows/ci.yml with: bun install, typecheck, lint, affected builds, migration validation")
-
-Task(subagent_type="general-purpose", prompt="Create root .env.example with all required environment variables documented")
-```
-
-### Phase 5: Documentation (Parallel)
-
-```
-Task(subagent_type="general-purpose", prompt="Create comprehensive README.md with: stack overview, env setup, dev commands, migration workflow, docker compose usage, Railway deploy steps")
-
-Task(subagent_type="general-purpose", prompt="Create CONTRIBUTING.md with database migration policy and development guidelines")
-```
+Use `functions.exec_command` for generators, installs, and validation commands, and `apply_patch` for manual file edits. Use `spawn_agent` only for bounded sidecar work that does not block the next dependency step. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
 
 ## Runtime Clarity
 
 - Use Bun as the package manager across the monorepo
 - Next.js dev/build/runtime runs on Node (per Next.js system requirements). API (Hono) runs on Bun
 - Document this in README to avoid "Bun runtime for Next" surprises
+
+## Completion Contract
+
+- Treat the scaffold as incomplete until apps, shared libs, infra files, env examples, and docs all exist and are internally consistent.
+- Do not skip dependency steps: workspace first, then apps/libs, then infra/docs, then verification.
+- If a requested integration cannot be completed because of upstream generator limits or missing credentials, mark it `[blocked]` with the exact gap.
+
+## Verification Loop
+
+Before finalizing:
+- verify the generated repo installs cleanly,
+- run the narrowest meaningful lint/typecheck/build/test commands,
+- verify the documented commands and file paths match the scaffold that was created,
+- confirm the required deliverables and proof points are either satisfied or explicitly `[blocked]`.
 
 ## Instructions
 

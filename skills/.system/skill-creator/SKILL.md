@@ -45,6 +45,20 @@ Match the level of specificity to the task's fragility and variability:
 
 Think of Codex as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
+### Prefer Explicit Prompt Contracts
+
+Modern skills are more reliable when the SKILL.md body makes the execution contract explicit.
+
+When updating or creating a skill, include the smallest set of these that materially improve correctness:
+
+- **Output contract**: exact sections, schema, or final block required
+- **Completion contract**: what must be covered before the task is considered done
+- **Verification loop**: what to re-check before finalizing or taking side effects
+- **Grounding rules**: what evidence is allowed and how to label inferences
+- **Side-effect gating**: when to stop at a draft/plan versus when to create, publish, push, merge, or comment remotely
+
+These blocks should stay concise. Add them only when they remove a real failure mode you have observed or expect from the workflow.
+
 ### Anatomy of a Skill
 
 Every skill consists of a required SKILL.md file and optional bundled resources:

@@ -21,6 +21,13 @@ Implement a single GitHub issue with a strict TDD workflow and leave the issue i
 4. Use `rg` instead of `grep` for shell text search and filtering.
 5. Stop with a concise explanation if the issue is closed.
 
+## Grounding and Verification Rules
+
+- Base requirements and acceptance criteria on the GitHub issue, nearby code, tests, and repository conventions gathered in this run.
+- If an implementation detail is inferred rather than stated explicitly, label it as an assumption in the handoff.
+- Treat the task as incomplete until implementation, local validation, and secret scanning have all passed or are explicitly `[blocked]`.
+- Before finalizing, verify the reported test/lint/typecheck/build results match the commands that actually ran.
+
 ## Deliver Completion State
 
 At successful completion:
@@ -209,21 +216,15 @@ BUILD=pass
 READY_FOR_MANUAL_GIT=true
 ```
 
-## Send Completion Notification Last
+## Final Response Contract
 
-After printing the final output block, send a Telegram notification as the final action using `parse_mode: "Markdown"`:
+After printing the final output block, end with a concise local handoff summary:
 
-```text
-✅ *Fix Issue Complete*
+- what changed,
+- which validation commands passed,
+- any remaining assumptions, risks, or blocked follow-up items.
 
-*Issue:* #$ISSUE_NUMBER
-*Status:* Implemented locally and validated
-*Git/PR:* Manual follow-up required
-
-*What was done:*
-- <implementation outcome>
-- <tests or validation outcome>
-```
+Send an external notification only if a notification tool is actually configured and the user explicitly asked for it.
 
 ## Follow Guidelines
 

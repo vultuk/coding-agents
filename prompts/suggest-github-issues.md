@@ -1,6 +1,6 @@
 ---
 name: suggest-github-issues
-description: Analyse the entire codebase and identify security fixes, code quality improvements, and system enhancements. Creates well-documented GitHub issues for each finding.
+description: Analyse the codebase for security fixes, code quality improvements, and system enhancements. Drafts evidence-backed GitHub issues and creates them when requested.
 arguments:
   - name: SCOPE
     required: false
@@ -12,86 +12,29 @@ arguments:
 
 # Suggest GitHub Issues
 
-Analyse the entire codebase in detail and create actionable GitHub issues.
+Analyse the entire codebase in detail and produce actionable, evidence-backed GitHub issue proposals.
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This workflow is **highly parallelisable**. Each analysis category can run independently, and issue creation can be batched.
+This workflow is highly parallelisable, but only the evidence gathering should be parallel by default.
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- Use `multi_tool_use.parallel` for independent category scans and repository reads.
+- Use `spawn_agent` only for bounded sidecar audits when the category is large enough to justify delegation.
+- Keep deduplication, prioritisation, and issue drafting in the main run so the final issue list stays consistent.
+- Use `functions.exec_command` for `gh issue create` only after the evidence set and dedupe pass are complete.
 
-### Phase 1: Parallel Category Analysis
+## Grounding and Creation Rules
 
-Launch **all analysis SubAgents simultaneously**:
+- Every proposed issue must cite concrete repository evidence such as `file:line`, failing command output, or a clearly named affected component.
+- If a finding is plausible but not yet well supported, keep it in the report as `[needs-validation]` instead of creating an issue.
+- If the user asked only for suggestions, stop at the preview/report stage.
+- Create GitHub issues only when the user explicitly asked for creation or the workflow is running in an automation context that already implies creation.
 
-```
-# Launch in a single message with multiple Task calls:
+## Completion Contract
 
-Task(subagent_type="Explore", prompt="SECURITY AUDIT: Analyse the codebase for security vulnerabilities. Look for:
-- Input validation gaps
-- Authentication/authorisation issues
-- Sensitive data exposure
-- Dependency vulnerabilities (check package.json, lock files)
-- Injection risks (SQL, command, XSS)
-- Insecure configurations
-Return: List of 3+ findings with file paths, line numbers, severity, and suggested fixes.", model="sonnet")
-
-Task(subagent_type="Explore", prompt="CODE QUALITY AUDIT: Analyse the codebase for code quality issues. Look for:
-- Code duplication (DRY violations)
-- Complex functions (high cyclomatic complexity)
-- Missing error handling
-- Inconsistent patterns
-- Dead code
-- Missing/outdated documentation
-Return: List of 3+ findings with file paths, line numbers, and improvement suggestions.", model="sonnet")
-
-Task(subagent_type="Explore", prompt="SYSTEM IMPROVEMENTS AUDIT: Analyse the codebase for enhancement opportunities. Look for:
-- Performance optimisations
-- Architectural improvements
-- Scalability concerns
-- Observability gaps (logging, metrics, tracing)
-- Developer experience improvements
-- Test coverage gaps
-Return: List of 3+ findings with affected areas and implementation suggestions.", model="sonnet")
-```
-
-### Phase 2: Issue Deduplication
-
-After all SubAgents return, consolidate findings:
-- Remove duplicates across categories
-- Prioritise by impact (high/medium/low)
-- Ensure no overlapping scope between issues
-
-### Phase 3: Parallel Issue Creation
-
-Launch **issue creation SubAgents in parallel** (batch by category):
-
-```
-# Create all issues in parallel:
-
-Task(subagent_type="Bash", prompt="Create GitHub issue using gh issue create:
-Title: <ISSUE_TITLE>
-Labels: security,priority:high
-Body: <FORMATTED_ISSUE_BODY>")
-
-Task(subagent_type="Bash", prompt="Create GitHub issue using gh issue create:
-Title: <ISSUE_TITLE>
-Labels: code-quality,priority:medium
-Body: <FORMATTED_ISSUE_BODY>")
-
-# ... repeat for all issues
-```
-
-### Alternative: Batch Issue Creation
-
-For efficiency, use a single **Bash SubAgent** to create all issues in sequence:
-```
-Task(subagent_type="Bash", prompt="Create these GitHub issues in sequence using gh issue create:
-1. [Issue 1 details]
-2. [Issue 2 details]
-...
-Return: List of created issue URLs")
-```
+- Treat the task as incomplete until each requested category has been analysed, deduplicated, and either drafted or explicitly marked `[blocked]`.
+- Do not create overlapping issues for the same root problem.
+- Before creating anything remotely, re-check that the final title/body/labels still match the deduplicated finding set.
 
 ## Analysis Categories
 
@@ -127,7 +70,7 @@ Look for:
 
 ## Issue Requirements
 
-For each finding, create a **concise and well-documented GitHub issue** including:
+For each finding, prepare a **concise and well-documented GitHub issue** including:
 
 - A clear, actionable title
 - A detailed description (what, why, how to fix)
@@ -188,19 +131,22 @@ gh issue create \
 
 ## Output
 
-Ensure all 9+ issues are:
+Ensure all proposed issues are:
 - Distinct (no overlapping scope)
 - Relevant to the actual codebase
 - Actionable with clear next steps
 - Prioritised appropriately
 
-After creating issues, provide a summary table:
+Provide a summary table:
 
 | # | Type | Priority | Title | Effort |
 |---|------|----------|-------|--------|
 | 1 | security | high | [Title] | medium |
 | 2 | code-quality | medium | [Title] | small |
 | ... | ... | ... | ... | ... |
+
+If issues were created, append the created issue numbers/URLs.
+If issues were only drafted, mark each row as `draft`.
 
 ## Related Skills
 

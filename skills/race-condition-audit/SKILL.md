@@ -23,7 +23,13 @@ arguments:
 
 Systematic process for finding concurrency bugs that cause data corruption, deadlocks, or non-deterministic behavior.
 
-**Codex note:** This skill references Claude Code subagents (`Task(...)`). In Codex, run the equivalent steps with tool calls (for example `functions.shell_command` and `multi_tool_use.parallel`) or run them sequentially. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+**Codex note:** Translate old `Task(...)` references into Codex-native execution: `functions.exec_command` for shell work, `multi_tool_use.parallel` for independent reads, and `spawn_agent` only for bounded sidecar analysis. See [`../../COMPATIBILITY.md`](../../COMPATIBILITY.md).
+
+## Grounding Rules
+
+- Report only races or concurrency hazards supported by concrete code evidence, tool output, or a clearly explained interleaving.
+- If a finding is a plausible but unproven concern, downgrade it and label the uncertainty explicitly.
+- Before finalizing, verify the reported location, category, and severity still match the code under review.
 
 ## Process
 
@@ -33,22 +39,22 @@ Find where concurrent execution begins:
 
 ```bash
 # TypeScript/JavaScript
-grep -rn "async \|Promise\|Worker\|fork" --include="*.ts" --include="*.js"
+rg -n "async |Promise|Worker|fork" --glob '*.ts' --glob '*.js'
 
 # Python
-grep -rn "threading\|asyncio\|async def" --include="*.py"
+rg -n "threading|asyncio|async def" --glob '*.py'
 
 # Go
-grep -rn "go func\|go \w\+(" --include="*.go"
+rg -n "go func|go \\w+\\(" --glob '*.go'
 
 # Rust
-grep -rn "thread::spawn\|tokio::spawn\|async fn" --include="*.rs"
+rg -n "thread::spawn|tokio::spawn|async fn" --glob '*.rs'
 
 # C++
-grep -rn "std::thread\|std::async\|pthread" --include="*.cpp" --include="*.hpp"
+rg -n "std::thread|std::async|pthread" --glob '*.cpp' --glob '*.hpp'
 
 # Java/Kotlin
-grep -rn "new Thread\|ExecutorService\|CompletableFuture\|suspend fun\|launch\|async {" --include="*.java" --include="*.kt"
+rg -n "new Thread|ExecutorService|CompletableFuture|suspend fun|launch|async \\{" --glob '*.java' --glob '*.kt'
 ```
 
 ### Step 2: Identify Shared Mutable State
@@ -177,16 +183,16 @@ go test -race ./...
 clang++ -fsanitize=thread -g source.cpp
 
 # Find non-atomic increments (JS/TS)
-grep -rn "++" --include="*.ts" | grep -v "for\|while\|i++"
+rg -n "\\+\\+" --glob '*.ts' | rg -v "for|while|i\\+\\+"
 
 # Find Python threading without locks
-grep -rn "threading.Thread" --include="*.py" -A5 | grep -v Lock
+rg -n -A5 "threading\\.Thread" --glob '*.py' | rg -v "Lock"
 
 # Find Java synchronized methods (potential bottlenecks)
-grep -rn "synchronized" --include="*.java"
+rg -n "synchronized" --glob '*.java'
 
 # Find Kotlin coroutines with shared state
-grep -rn "var.*=.*mutableListOf\|var.*=.*mutableMapOf" --include="*.kt"
+rg -n "var.*=.*mutableListOf|var.*=.*mutableMapOf" --glob '*.kt'
 ```
 
 ## Subagent Usage

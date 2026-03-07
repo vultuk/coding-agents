@@ -22,54 +22,41 @@ Analyse all changes since the last published version. Determine the appropriate 
 - Write access to the repository
 - (Optional) NPM credentials if publishing to NPM
 
-## SubAgent Strategy
+## Codex Execution Strategy
 
-This workflow benefits from parallel analysis in the early phases.
+This workflow benefits from parallel discovery, but release actions must stay sequential.
 
-**Codex note:** Codex does not support `Task(...)` subagents. Use `functions.shell_command` and `multi_tool_use.parallel` to run the same commands, or run steps sequentially. For Explore/Plan tasks, use normal file searches and the plan tool. See [`../COMPATIBILITY.md`](../COMPATIBILITY.md).
+- Use `multi_tool_use.parallel` for read-only discovery:
+  - latest tag and commits since tag
+  - version file inventory
+  - publish-target/auth checks such as NPM status
+- Generate the version decision and changelog only after discovery is complete.
+- Keep version writes, commit/tag creation, push, release creation, merge, and publish steps sequential and verified.
+- Use `functions.exec_command` for git, `gh`, package-manager, and registry commands, and `apply_patch` for manual changelog/version-file edits.
 
-### Phase 1: Parallel Discovery
+## Completion Contract
 
-Launch these SubAgents **simultaneously**:
+- Treat the release as incomplete until version files, changelog, tags, remote release state, and optional publish state are all confirmed or explicitly `[blocked]`.
+- Do not guess the bump level when commit evidence is mixed; document the exact release rationale.
+- Do not publish or merge if local validation or dry-run packaging fails.
 
-1. **Bash SubAgent**: Get version info
-   ```
-   Task(subagent_type="Bash", prompt="Run these commands:
-   - git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0' (latest tag)
-   - git log $(git describe --tags --abbrev=0 2>/dev/null || echo '')..HEAD --oneline (commits since tag)
-   - cat package.json | jq -r .version 2>/dev/null (current package version)")
-   ```
+## Action Safety
 
-2. **Bash SubAgent**: Analyse commit types
-   ```
-   Task(subagent_type="Bash", prompt="Run: git log $(git describe --tags --abbrev=0 2>/dev/null)..HEAD --format='%s' and categorise commits by type (feat/fix/BREAKING CHANGE/etc)")
-   ```
+Before the first irreversible step, print a short pre-flight summary covering:
+- previous version,
+- proposed new version,
+- release type (`major|minor|patch|override`),
+- publish targets (GitHub release, package registry, other).
 
-3. **Explore SubAgent**: Find version files
-   ```
-   Task(subagent_type="Explore", prompt="Find all files that contain version numbers that need updating: package.json, package-lock.json, Cargo.toml, pyproject.toml, version.ts, etc. List their paths and current versions.")
-   ```
+If the version decision or publish target is materially ambiguous, stop for confirmation.
 
-4. **Bash SubAgent**: Check NPM status (if applicable)
-   ```
-   Task(subagent_type="Bash", prompt="Run: npm whoami 2>/dev/null && npm view $(cat package.json | jq -r .name) versions --json 2>/dev/null to check NPM auth and existing versions")
-   ```
+## Verification Loop
 
-### Phase 2: Changelog Generation
-
-Use a **general-purpose SubAgent** to generate the changelog:
-```
-Task(subagent_type="general-purpose", prompt="Generate a CHANGELOG.md entry for version <NEW_VERSION>. Group changes by: Added, Changed, Fixed, Removed, Security. Use these commits: <COMMIT_LIST>")
-```
-
-### Phase 3: Parallel Updates (After Version Determined)
-
-Launch these **in parallel** to update all version files:
-```
-Task(subagent_type="Bash", prompt="Update version in package.json to <NEW_VERSION> using: npm version <NEW_VERSION> --no-git-tag-version")
-```
-
-Additional file updates can be done in parallel with Edit tool calls.
+Before finalizing:
+- verify all version-bearing files were updated consistently,
+- verify the changelog matches the selected version and commit set,
+- verify tags, remote branch/PR state, and release URL after push,
+- if publishing, verify the published version or the exact blocked failure.
 
 ## Workflow
 
