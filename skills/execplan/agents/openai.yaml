@@ -1,0 +1,4 @@
+interface:
+  display_name: "ExecPlan"
+  short_description: "Manage living ExecPlans in GitHub issue comments"
+  default_prompt: "Use $execplan to turn GitHub issue #123 into a living ExecPlan comment and keep it updated while implementing the work."
