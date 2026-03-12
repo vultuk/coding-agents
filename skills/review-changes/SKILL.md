@@ -1,12 +1,40 @@
 ---
 name: review-changes
-description: Review code changes from any source and produce exactly one concise, high-signal markdown review output with clear merge status. Use when asked to review diffs, commits, pull requests, or local changes and return findings in a single structured response.
+description: Review code changes from any source by defaulting to a parallel multi-agent review with adjudication, then return exactly one concise, high-signal markdown review output with clear merge status. Use when asked to review diffs, commits, pull requests, or local changes and return findings in a single structured response.
 ---
 
 # Review Changes
 
-Generate one actionable review summary focused on changed code and highest-risk issues.
-Return the review as markdown output only.
+By default, run a parallel review workflow that collects one canonical diff packet, sends it to multiple reviewer agents, then adjudicates their outputs into one final review.
+Return one final markdown review plus one short consensus note unless the caller explicitly requests reviewer-only or adjudicator-only behavior.
+
+## Caller Inputs
+
+Accept these caller-provided inputs when present:
+
+- `AGENTS=<n>`: preferred explicit reviewer count override
+- `SOURCE=<value>`: optional explicit diff source override
+- Plain-language equivalents such as `with 5 reviewer agents` or `review staged changes`
+
+Treat `AGENTS=<n>` and equivalent wording as reviewer count only. The adjudicator remains a separate final pass.
+
+## Mode Selection
+
+Choose the narrowest mode that matches the request:
+
+1. `Parallel orchestration` (default)
+- Use when the user asks for a review of local changes, staged changes, a commit range, or a PR diff and has not already provided a canonical diff packet.
+- This mode runs multiple reviewer agents in parallel and one adjudicator agent.
+
+2. `Reviewer-only`
+- Use when the caller already provides a canonical diff packet and explicitly asks for a single review output, or when the request says to act only as one reviewer.
+- In this mode, do not spawn more agents.
+- Return exactly one markdown review output using the contract below.
+
+3. `Adjudicator-only`
+- Use when the caller provides multiple reviewer outputs plus the canonical diff packet and asks for a final consolidated review.
+- In this mode, do not spawn reviewer agents.
+- Return exactly one final markdown review using the same structure below.
 
 ## Require Inputs and Preconditions
 
@@ -15,6 +43,65 @@ Return the review as markdown output only.
 1. Local working tree and staged changes
 2. Commit or commit range
 3. Pull request diff (optional, if available)
+
+## Parallel Orchestration Workflow
+
+When operating in default mode, execute this workflow:
+
+1. Resolve review width.
+- Default to `3` reviewer agents.
+- Accept an explicit override only when the caller provides one.
+- Keep the allowed range to `1-8`; reject invalid values.
+
+2. Resolve the diff source.
+- `pr:<number>`: use `gh pr diff <number>`
+- `commit:<base>..<head>`: use `git diff <base>..<head>`
+- `staged`: use `git diff --staged`
+- `local` or unset: collect both `git diff` and `git diff --staged`
+
+3. Build one canonical review packet shared by every reviewer.
+- Include the changed file list.
+- Include the diff content.
+- Include any user-specified scope, risk areas, or review instructions.
+- If no diff content exists, stop and report `No changes found to review.`
+
+4. Spawn reviewer agents in parallel with the same canonical packet.
+- Reviewer instruction:
+
+```text
+Use the review-changes skill in reviewer-only mode.
+Review only the provided diff packet.
+Follow the skill's output contract exactly.
+Return exactly one markdown review output.
+Do not spawn additional agents.
+```
+
+5. Wait for all reviewers.
+- If one or more reviewers fail, continue with successful outputs.
+- If all reviewers fail, stop and return the failure details.
+
+6. Spawn one adjudicator agent with the canonical diff packet and all reviewer outputs.
+- Adjudicator instruction:
+
+```text
+Use the review-changes skill in adjudicator-only mode.
+Adjudicate these reviewer outputs into one final consolidated review.
+Keep only findings supported by evidence in the canonical diff packet.
+When reviewers disagree, prefer the highest-confidence interpretation and downgrade uncertain claims.
+Do not invent new findings unless directly evidenced in the diff.
+Use the skill's markdown structure exactly.
+Return exactly one final markdown review.
+Do not spawn additional agents.
+```
+
+7. Return:
+- the adjudicated final review
+- a short consensus note that states reviewer count used and any failed agents
+
+8. Verification before returning:
+- confirm every surviving finding is supported by the canonical diff packet
+- confirm reviewer failures are mentioned in the consensus note
+- confirm the response contains exactly one markdown review plus one short consensus note
 
 ## Enforce Safety and Scope
 
@@ -28,7 +115,7 @@ Return the review as markdown output only.
 
 ## Prioritization Order
 
-Review and report in this order:
+Review and adjudicate in this order:
 
 1. Correctness and edge cases
 2. Security and privacy
@@ -67,9 +154,18 @@ gh pr diff "$PR_NUMBER"
 - concrete fix (small patch-style suggestion when possible)
 5. Keep test recommendations specific, but only under `## Tests` and always non-blocking.
 
+For adjudicator-only mode:
+
+1. Compare reviewer claims against the canonical diff packet.
+2. Keep only findings with clear evidence and plausible impact.
+3. Merge duplicates and choose the clearest phrasing.
+4. Downgrade or discard claims that depend on missing context or weak inference.
+5. Preserve the same output structure and merge decision rules.
+
 ## Output Contract
 
-- Return exactly one markdown review output.
+- Reviewer-only and adjudicator-only modes: return exactly one markdown review output.
+- Default parallel mode: return exactly one markdown review output, then one short consensus note.
 - Keep it concise and actionable (target under 700 words).
 - Do not include generic advice or long diff restatements.
 

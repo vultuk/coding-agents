@@ -17,8 +17,9 @@ This repository contains reusable skills for Codex and Claude Code workflows. Se
 | `pr-feedback-workflow` | Continuous PR feedback and CI handling loop |
 | `prompt-optimizer` | Rewrite rough prompts into stronger GPT-5.4-style prompt contracts |
 | `race-condition-audit` | Concurrency and race-condition analysis across supported languages |
-| `review-changes` | One high-signal consolidated review for diffs, commits, or PRs |
+| `review-changes` | Parallel diff review with adjudication into one high-signal final review |
 | `rust-best-practices-enforcer` | Rust handbook enforcement with automated checker integration |
+| `wiki-changelog` | Daily repository wiki changelog updates from merged PR summaries |
 
 ## Repo Expectations
 
