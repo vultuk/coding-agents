@@ -45,19 +45,13 @@ Match the level of specificity to the task's fragility and variability:
 
 Think of Codex as exploring a path: a narrow bridge with cliffs needs specific guardrails (low freedom), while an open field allows many routes (high freedom).
 
-### Prefer Explicit Prompt Contracts
+### Protect Validation Integrity
 
-Modern skills are more reliable when the SKILL.md body makes the execution contract explicit.
+You may use subagents during iteration to validate whether a skill works on realistic tasks or whether a suspected problem is real. This is most useful when you want an independent pass on the skill's behavior, outputs, or failure modes after a revision.  Only do this when it is possible to start new subagents.
 
-When updating or creating a skill, include the smallest set of these that materially improve correctness:
+When using subagents for validation, treat that as an evaluation surface. The goal is to learn whether the skill generalizes, not whether another agent can reconstruct the answer from leaked context.
 
-- **Output contract**: exact sections, schema, or final block required
-- **Completion contract**: what must be covered before the task is considered done
-- **Verification loop**: what to re-check before finalizing or taking side effects
-- **Grounding rules**: what evidence is allowed and how to label inferences
-- **Side-effect gating**: when to stop at a draft/plan versus when to create, publish, push, merge, or comment remotely
-
-These blocks should stay concise. Add them only when they remove a real failure mode you have observed or expect from the workflow.
+Prefer raw artifacts such as example prompts, outputs, diffs, logs, or traces. Give the minimum task-local context needed to perform the validation. Avoid passing the intended answer, suspected bug, intended fix, or your prior conclusions unless the validation explicitly requires them.
 
 ### Anatomy of a Skill
 
@@ -235,7 +229,7 @@ Skill creation involves these steps:
 3. Initialize the skill (run init_skill.py)
 4. Edit the skill (implement resources and write SKILL.md)
 5. Validate the skill (run quick_validate.py)
-6. Iterate based on real usage
+6. Iterate based on real usage and forward-test complex skills.
 
 Follow these steps in order, skipping only if there is a clear reason why they are not applicable.
 
@@ -332,6 +326,8 @@ Only include other optional interface fields when the user explicitly provides t
 
 When editing the (newly-generated or existing) skill, remember that the skill is being created for another instance of Codex to use. Include information that would be beneficial and non-obvious to Codex. Consider what procedural knowledge, domain-specific details, or reusable assets would help another Codex instance execute these tasks more effectively.
 
+After substantial revisions, or if the skill is particularly tricky, you should use subagents to forward-test the skill on realistic tasks or artifacts. When doing so, pass the artifact under validation rather than your diagnosis of what is wrong, and keep the prompt generic enough that success depends on transferable reasoning rather than hidden ground truth.
+
 #### Start with Reusable Skill Contents
 
 To begin implementation, start with the reusable resources identified above: `scripts/`, `references/`, and `assets/` files. Note that this step may require user input. For example, when implementing a `brand-guidelines` skill, the user may need to provide brand assets or templates to store in `assets/`, or documentation to store in `references/`.
@@ -372,11 +368,46 @@ The validation script checks YAML frontmatter format, required fields, and namin
 
 ### Step 6: Iterate
 
-After testing the skill, users may request improvements. Often this happens right after using the skill, with fresh context of how the skill performed.
+After testing the skill, you may detect the skill is complex enough that it requires forward-testing; or users may request improvements.
 
-**Iteration workflow:**
+User testing often this happens right after using the skill, with fresh context of how the skill performed.
+
+**Forward-testing and iteration workflow:**
 
 1. Use the skill on real tasks
 2. Notice struggles or inefficiencies
 3. Identify how SKILL.md or bundled resources should be updated
 4. Implement changes and test again
+5. Forward-test if it is reasonable and appropriate
+
+## Forward-testing
+
+To forward-test, launch subagents as a way to stress test the skill with minimal context.
+Subagents should *not* know that they are being asked to test the skill.  They should be treated as
+an agent asked to perform a task by the user.  Prompts to subagents should look like:
+  `Use $skill-x at /path/to/skill-x to solve problem y`
+Not:
+  `Review the skill at /path/to/skill-x; pretend a user asks you to...`
+
+Decision rule for forward-testing:
+  - Err on the side of forward-testing
+  - Ask for approval if you think there's a risk that forward-testing would:
+    * take a long time,
+    * require additional approvals from the user, or
+    * modify live production systems
+
+  In these cases, show the user your proposed prompt and request (1) a yes/no decision, and
+  (2) any suggested modifictions.
+
+Considerations when forward-testing:
+   - use fresh threads for independent passes
+   - pass the skill, and a request in a similar way the user would.
+   - pass raw artifacts, not your conclusions
+   - avoid showing expected answers or intended fixes
+   - rebuild context from source artifacts after each iteration
+   - review the subagent's output and reasoning and emitted artifacts
+   - avoid leaving artifacts the agent can find on disk between iterations;
+     clean up subagents' artifacts to avoid additional contamination.
+
+If forward-testing only succeeds when subagents see leaked context, tighten the skill or the
+forward-testing setup before trusting the result.
