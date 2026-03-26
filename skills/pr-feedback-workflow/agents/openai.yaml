@@ -1,4 +1,4 @@
 interface:
   display_name: "PR Feedback Workflow"
-  short_description: "Continuously monitor PR feedback with 5-minute polling"
-  default_prompt: "Use $pr-feedback-workflow to continuously monitor this PR, address new feedback, and keep CI healthy with a 5-minute polling loop until I stop you."
+  short_description: "Resumable PR feedback monitor with persisted state and watch mode"
+  default_prompt: "Use $pr-feedback-workflow to monitor this PR in watch mode. Resolve the PR context, reuse the existing state file if present, run the helper script as the canonical polling engine, handle each surfaced item, persist handled or blocked state updates, and then re-enter watch mode until I stop you or the PR closes."

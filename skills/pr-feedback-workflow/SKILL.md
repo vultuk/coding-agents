@@ -1,248 +1,244 @@
 ---
 name: pr-feedback-workflow
-description: Continuously monitor an open GitHub pull request, process new review feedback and CI failures in a loop, apply fixes or evidence-based replies, create follow-up issues with generate-issue for out-of-scope requests, resolve review threads, and send a completion notification. Use when asked to address PR feedback continuously, handle review comments end-to-end, auto-fix CI failures, or run a PR feedback loop until stopped.
+description: Continuously monitor an open GitHub pull request, process new review feedback and CI failures in a resumable loop, apply fixes or evidence-based replies, create follow-up issues when work is out of scope, resolve review threads, and keep re-entering watch mode until stopped.
 ---
 
 # PR Feedback Workflow
 
-Monitor a pull request in a continuous loop, handle all new feedback and CI failures autonomously, and keep re-checking until stopped.
+Use this skill when the user wants an open pull request monitored continuously rather than handled in one pass. The workflow is stateful and resumable: idle polls must not terminate the run, and restarts must continue from the saved state instead of reprocessing the same feedback.
 
-## Follow Core Behaviour
+## Inputs
 
-For each new feedback item, choose exactly one path:
+- `PR` optional. Accept a PR number or PR URL. Default: the PR for the current branch.
+- `MODE=watch|once` optional. Default: `watch`.
+- `POLL_SECONDS` optional. Default: `300`. Minimum: `300`.
+- `STATE_FILE` optional. Default: `.git/codex/pr-feedback-workflow/pr-<number>.json` in the current repository.
+
+## Required Helper
+
+Use the helper as the canonical snapshot and state engine:
+
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode <watch|once> --poll-seconds 300 --state-file <path> [--pr <number|url>]
+```
+
+In `watch` mode the helper must keep polling while the PR is idle and return only when one of these happens:
+
+- new or updated actionable work is present
+- a blocker is present
+- the PR is merged or closed
+
+In `once` mode the helper returns one snapshot immediately.
+
+The helper emits JSON with:
+
+- `pr`
+- `iteration`
+- `status` as `actionable|idle|blocked|closed`
+- `new_items`
+- `updated_items`
+- `failed_checks`
+- `blocked_reasons`
+- `state_file`
+
+The helper also supports state updates before the next snapshot:
+
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
+  --mode once \
+  --state-file <path> \
+  --mark-handled <item-key> \
+  --set-last-action "<summary>"
+```
+
+Optional update flags:
+
+- `--mark-handled <item-key>` repeatable
+- `--record-blocked <item-key>=<reason>` repeatable
+- `--increment-retry <item-key>` repeatable
+- `--clear-retry <item-key>` repeatable
+- `--set-last-action "<summary>"`
+
+## State Contract
+
+Persist workflow state atomically after each helper invocation. The state file is the source of truth for dedupe, resume, and retry tracking.
+
+Stable state fields:
+
+- `repo`
+- `pr_number`
+- `pr_state`
+- `loop_iteration`
+- `last_poll_at`
+- `handled_review_ids`
+- `handled_comment_ids`
+- `handled_thread_ids`
+- `handled_body_hashes`
+- `handled_ci_failures`
+- `pending_items`
+- `blocked_items`
+- `retry_counters`
+- `last_action_summary`
+
+Operational rules:
+
+- `handled_body_hashes` is keyed by item key and stores the last handled body hash. If the same item key appears again with a different body hash, treat it as updated work.
+- `handled_ci_failures` is keyed by `failure-class + head SHA`. The same CI failure on the same SHA is deduped after handling; the same failure on a new SHA is new work.
+- `retry_counters` must survive restarts so transient retry budgets do not reset.
+- `blocked_items` are resumable blockers, not terminal loss of state.
+
+## Workflow
+
+### 1. Resolve PR Context
+
+Use the helper or `gh pr view` to resolve the PR. If no PR exists for the current branch and none was provided explicitly, stop and report that clearly.
+
+### 2. Enter Watch Mode
+
+Default to:
+
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode watch --poll-seconds 300 --state-file "$STATE_FILE" [--pr "$PR"]
+```
+
+Do not implement your own sleep loop in the agent. Let the helper absorb idle polls and return only when work, a blocker, or closure exists.
+
+### 3. Process Every Surfaced Item
+
+For each item in `new_items` and `updated_items`, choose exactly one path:
 
 1. Fix it: implement code changes, test, commit, push, reply.
 2. No code change needed: reply with evidence-based explanation.
-3. Out of scope: create a follow-up issue via `$generate-issue`, then reply with the issue link.
+3. Out of scope: draft a follow-up with `$issue-writer`, create it with `gh issue create`, then reply with the issue link.
 
-Then continue monitoring for newly arriving feedback and CI updates.
+Treat human and bot reviews equally. For every actionable thread, always post a direct thread reply.
 
-Treat all GitHub reviews equally, including human and bot reviews. For every actionable review item, post an explicit reply and resolve the thread after action is taken.
+### 4. Persist Action Outcomes Immediately
 
-## Enforce Hard Requirements
+After each reply, fix, thread resolution, blocker, or retry update, write it back to the state file before re-entering watch mode.
 
-1. For every newly submitted review from humans or bots, process all contained actionable items.
-2. For every actionable review comment thread, always post a direct reply on that thread.
-3. After taking action (fix, explain, or follow-up issue), mark that thread resolved.
-4. If a review has a top-level body with requested action, post a PR-level response comment summarising what was done.
-5. Do not stop after one pass; continue looped monitoring by default.
-6. Use `$generate-issue` for out-of-scope follow-ups.
-7. Keep scope to the current PR; do not inspect other issues or PRs unless explicitly requested.
+Examples:
 
-## Completeness and Verification Rules
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
+  --mode once \
+  --state-file "$STATE_FILE" \
+  --mark-handled "thread:123" \
+  --set-last-action "Replied on thread:123 and resolved it"
+```
 
-- Treat the workflow as incomplete until every newly discovered actionable item in the current polling snapshot is handled or explicitly marked `[blocked]`.
-- Track processed review IDs, comment IDs, thread IDs, and CI failure classes so the loop can distinguish new work from already handled work.
-- Before resolving a thread, verify that the requested action actually happened: code pushed, evidence posted, or follow-up issue created.
-- Before each sleep, verify the snapshot summary matches the current PR state so no newly arrived items are skipped.
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
+  --mode once \
+  --state-file "$STATE_FILE" \
+  --record-blocked "issue-comment:456=gh issue create failed after retry budget"
+```
 
-## Run Continuous Loop
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
+  --mode once \
+  --state-file "$STATE_FILE" \
+  --increment-retry "ci:test-suite:<head-sha>" \
+  --set-last-action "Retrying flaky test-suite job after timeout"
+```
 
-Default mode is watch-loop with a minimum polling interval of 300 seconds (5 minutes).
-Use a practical range of 300-420 seconds to avoid tight polling patterns.
-Do not poll more frequently unless the user explicitly asks for faster checks.
+### 5. Resume Watch Mode
+
+After the current surfaced work is handled or recorded as blocked, go back to watch mode using the same state file. Do not stop just because one pass is green.
+
+### 6. Exit Conditions
 
 Stop only when:
-- user explicitly says stop, or
-- PR is merged or closed.
 
-Even when everything is green, keep polling for new feedback.
+- the user explicitly says stop
+- the PR is merged
+- the PR is closed
+- an unrecoverable blocker is recorded and surfaced as `status=blocked`
 
-## Run Workflow
+Even in a blocked state, leave the saved state file intact so the run can resume later.
 
-### Phase 1: Identify PR context
+## Review and Reply Rules
 
-Resolve PR number from explicit input or current branch:
+- Reply on every actionable review thread.
+- If a review has a meaningful top-level body, add one PR-level comment summarising what changed.
+- Use concise, evidence-based replies with concrete file paths or codebase references.
+- Use UK spelling in user-facing text.
 
-```bash
-gh pr view --json number,url,title,headRefName,baseRefName,state
-```
+Never resolve a thread until:
 
-If PR does not exist, stop and report clearly.
+1. the reply mutation succeeded, and
+2. the next helper snapshot or direct GitHub check confirms the action is reflected
 
-### Phase 2: Poll snapshot (each loop iteration)
+If confirmation fails, do not mark the item handled yet.
 
-Gather in parallel:
+## CI Self-Healing
 
-```bash
-gh pr checks --json name,state,conclusion,link
-gh api repos/{owner}/{repo}/pulls/{number}/comments
-gh api repos/{owner}/{repo}/pulls/{number}/reviews
-gh api repos/{owner}/{repo}/issues/{number}/comments
-gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved comments(first:20){nodes{id body author{login} createdAt url}}}}}}}' -f owner="$OWNER" -f repo="$REPO" -F pr=$PR_NUMBER
-```
+If a surfaced item is a CI failure:
 
-Track processed comment and thread IDs so each item is handled once unless updated.
-
-Also track processed review IDs so newly submitted manual and bot reviews are always acknowledged and handled.
-
-If comments suggest broader follow-up work, keep the PR focused and use `$generate-issue` for out-of-scope tracking.
-
-### Phase 3: Classify each new actionable item
-
-Classification matrix:
-
-| Class | Action |
-|------|--------|
-| Directly required code change | Implement + test + commit + push + reply |
-| Clarification or disagreement | Reply with codebase-backed reasoning |
-| Out of scope for this PR | Create follow-up issue via `$generate-issue` + reply |
-| CI failure without review comment | Diagnose and auto-fix |
-
-### Phase 3.5: Apply review-by-review response contract
-
-For each new review with actionable feedback:
-
-1. Enumerate all inline review comments and classify each item.
-2. Execute one of the three action paths for each item.
-3. Reply on each review thread with the action outcome.
-4. Resolve that thread immediately after action is completed.
-5. If the review includes a top-level summary or request, add one PR-level comment summarising disposition.
-
-Use these primitives:
-
-```bash
-# Reply to a review comment
-gh api repos/{owner}/{repo}/pulls/comments/{comment_id}/replies -f body="<response>"
-
-# Resolve review thread
-gh api graphql -f query='mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}' -f threadId="$THREAD_ID"
-```
-
-### Phase 4: Execute actions
-
-#### A) Fix path
-
-1. Apply minimal code change.
-2. Run relevant tests, lint, typecheck, and build.
-3. Commit and push.
-4. Reply to comment with what changed (include file paths).
-5. Resolve the thread once fix is in place and reply is posted.
-
-#### B) No-change path
-
-Reply with concise technical justification and references:
-- cite existing pattern files
-- explain why requested change is not needed now
-- keep tone collaborative
-
-Resolve thread only if reply fully addresses concern.
-
-In this workflow, once explanation is posted as the chosen action and no further change is pending, resolve the thread.
-
-#### C) Out-of-scope path (must use `$generate-issue`)
-
-Before creating a follow-up issue, keep momentum and focus on the actionable request.
-
-Invoke `$generate-issue` with full context:
-
-```text
-Prompt payload:
-- Source PR: #<number> <url>
-- Reviewer comment URL and text
-- Why this is out of scope for current PR
-- Suggested follow-up direction
-Expected output: created issue URL and number
-```
-
-Then reply on the PR comment:
-
-```text
-Great suggestion. This is out of scope for this PR, so I opened <issue-url> to track it and keep this PR focused.
-```
-
-Resolve the thread after posting the follow-up issue link.
-
-### Phase 5: CI self-healing
-
-If any check fails:
-
-1. Fetch failed logs.
+1. Inspect the failing logs.
 2. Classify transient vs persistent.
-3. For transient errors (timeout, 429, network): retry with backoff.
-4. For persistent errors: implement fix, commit, push.
-5. Re-check CI and continue loop.
+3. For transient failures, retry with backoff and update `retry_counters`.
+4. For persistent failures, implement the fix, validate, commit, push, and reply if needed.
+5. Clear retry state when the failure class is resolved for the current SHA.
 
 Retry budget:
-- transient: up to 5 retries
-- persistent fix cycles: up to 3 per distinct failure class
 
-### Phase 6: Loop decision
+- transient retries: up to `5`
+- persistent fix cycles: up to `3` per distinct failure class and head SHA
 
-After processing current items:
+## Out-of-Scope Follow-Ups
 
-1. Sleep for at least 300 seconds before the next poll (recommended 300-420 seconds with jitter).
-2. Poll a fresh snapshot.
-3. If new actionable items exist, process them and continue the loop.
-4. If no actionable items exist (including when CI is still pending), keep looping and sleep for the next interval.
+This skill no longer depends on `generate-issue`.
 
-Do not exit just because all checks are green once.
+When feedback is valid but out of scope:
 
-## Follow Reply Quality Rules
+1. Use `$issue-writer` to draft a short implementation issue body.
+2. Create the issue with `gh issue create`.
+3. Reply on the PR thread with the issue link.
+4. Mark the surfaced item handled only after the reply is posted successfully.
 
-- Be specific and evidence-based.
-- Mention concrete files and functions when claiming precedent.
-- Keep explanations short, direct, and respectful.
-- Use UK spelling in user-facing text.
-- Use `rg` instead of `grep` for shell-based text search and filtering.
+If issue creation fails after retries, record a blocker with `--record-blocked` and leave the thread unresolved.
 
-## Escalate Only as Last Resort
+## Status Cadence
 
-Escalate only if all retries are exhausted:
-
-| Condition | Escalate After |
-|-----------|----------------|
-| Same CI class keeps failing | 3 fix attempts |
-| Reviewer conflict with no codebase precedent | present both options once |
-| Security-sensitive disagreement | immediate human review |
-
-Escalation message format:
-
-```markdown
-## Escalation Required
-
-PR: #$PR_NUMBER
-Reason: [blocker]
-
-Attempts made:
-1. ...
-2. ...
-3. ...
-
-Recommended decision:
-[specific choice]
-```
-
-## Maintain Output Cadence
-
-Post concise periodic status updates while looping:
+While the workflow is active, post concise status updates in this format:
 
 ```text
 PR=<url>
 LOOP_ITERATION=<n>
 NEW_ITEMS=<count>
-ACTION_TAKEN=fix|explain|follow-up-issue|none
+ACTION_TAKEN=fix|explain|follow-up-issue|retry|blocked|none
 CI=pass|fail|pending
+STATE_FILE=<path>
 ```
 
-When the user stops monitoring, provide a final summary of:
-- fixes applied
-- explanations posted
-- follow-up issues created
-- current CI and unresolved-thread state
+## Validation
+
+Before trusting the helper behaviour, use:
+
+```bash
+python3 -m unittest discover -s skills/pr-feedback-workflow/tests -v
+```
+
+Live manual validation on a disposable PR should confirm:
+
+- idle watch mode keeps polling instead of exiting
+- a new review appears on the next surfaced snapshot
+- a failing check is deduped per failure class and head SHA
+- blocked issue creation leaves a resumable blocker instead of silently giving up
 
 ## Final Response Contract
 
-When monitoring ends (user stops, or PR is merged or closed), finish with a concise final summary covering:
-- why monitoring ended,
-- fixes applied,
-- explanations posted,
-- follow-up issues created,
-- final CI state,
-- unresolved-thread state.
+When monitoring ends, return a concise summary covering:
 
-Send an external notification only if a notification tool is configured and the user explicitly asked for it.
+- why monitoring ended
+- fixes applied
+- explanations posted
+- follow-up issues created
+- final CI state
+- unresolved-thread state
+- path to the saved state file
 
 ## Related Skills
 
-- [generate-issue](../generate-issue/SKILL.md)
+- [issue-writer](../issue-writer/SKILL.md)
