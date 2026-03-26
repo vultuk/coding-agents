@@ -1,4 +1,4 @@
 interface:
   display_name: "Review Changes"
-  short_description: "Run a parallel diff review and adjudicate one final summary"
-  default_prompt: "Use $review-changes to analyze the current code diff with multiple reviewer agents in parallel, adjudicate the results into one concise evidence-based markdown review, and use conservative blocker thresholds with high-confidence evidence."
+  short_description: "Run four parallel diff reviewers and adjudicate one final summary"
+  default_prompt: "Use $review-changes to analyze the current code diff with four model-specific reviewer agents in parallel (GPT-5.4, Claude Sonnet 4.6, Grok Code Fast 1, and Gemini 3.1 Pro Preview), adjudicate the results into one concise evidence-based markdown review, and use conservative blocker thresholds with high-confidence evidence."

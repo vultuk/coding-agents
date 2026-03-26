@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Writer"
+  short_description: "Draft concise, eval-driven GitHub issues"
+  default_prompt: "Use $issue-writer to turn a rough request into a short GitHub issue with clear problem framing, outcome-based requirements, and observable evals."

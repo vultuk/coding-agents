@@ -13,6 +13,8 @@ Return one final markdown review plus one short consensus note unless the caller
 Accept these caller-provided inputs when present:
 
 - `AGENTS=<n>`: preferred explicit reviewer count override
+- `REVIEWER_AGENTS=<name1,name2,...>`: explicit reviewer subagent roster override
+- `ADJUDICATOR_AGENT=<name>`: explicit adjudicator subagent override
 - `SOURCE=<value>`: optional explicit diff source override
 - Plain-language equivalents such as `with 5 reviewer agents` or `review staged changes`
 
@@ -48,24 +50,36 @@ Choose the narrowest mode that matches the request:
 
 When operating in default mode, execute this workflow:
 
-1. Resolve review width.
-- Default to `3` reviewer agents.
-- Accept an explicit override only when the caller provides one.
-- Keep the allowed range to `1-8`; reject invalid values.
+1. Resolve reviewer roster.
+- If the caller provides `REVIEWER_AGENTS=<name1,name2,...>`, use that exact reviewer roster.
+- In OpenCode environments that define these subagents, default to this reviewer roster:
+  - `review-changes-gpt-5-4`
+  - `review-changes-claude-sonnet-4-6`
+  - `review-changes-grok-code-fast-1`
+  - `review-changes-gemini-3-1-pro-preview`
+- Otherwise default to `3` generic reviewer agents.
+- Only use `AGENTS=<n>` when no explicit reviewer roster is available. Keep the allowed range to `1-8`; reject invalid values.
 
-2. Resolve the diff source.
+2. Resolve adjudicator.
+- If the caller provides `ADJUDICATOR_AGENT=<name>`, use it.
+- In OpenCode environments that define `review-changes-adjudicator`, prefer that subagent.
+- Otherwise use one generic adjudicator pass.
+
+3. Resolve the diff source.
 - `pr:<number>`: use `gh pr diff <number>`
 - `commit:<base>..<head>`: use `git diff <base>..<head>`
 - `staged`: use `git diff --staged`
 - `local` or unset: collect both `git diff` and `git diff --staged`
 
-3. Build one canonical review packet shared by every reviewer.
+4. Build one canonical review packet shared by every reviewer.
 - Include the changed file list.
 - Include the diff content.
 - Include any user-specified scope, risk areas, or review instructions.
 - If no diff content exists, stop and report `No changes found to review.`
 
-4. Spawn reviewer agents in parallel with the same canonical packet.
+5. Spawn reviewer agents in parallel with the same canonical packet.
+- When a named reviewer roster is available, invoke exactly those subagents in parallel.
+- Otherwise spawn the resolved number of generic reviewer agents.
 - Reviewer instruction:
 
 ```text
@@ -76,11 +90,13 @@ Return exactly one markdown review output.
 Do not spawn additional agents.
 ```
 
-5. Wait for all reviewers.
+6. Wait for all reviewers.
 - If one or more reviewers fail, continue with successful outputs.
 - If all reviewers fail, stop and return the failure details.
 
-6. Spawn one adjudicator agent with the canonical diff packet and all reviewer outputs.
+7. Spawn one adjudicator agent with the canonical diff packet and all reviewer outputs.
+- When a named adjudicator agent is available, invoke that subagent.
+- Otherwise run one generic adjudicator pass.
 - Adjudicator instruction:
 
 ```text
@@ -94,11 +110,11 @@ Return exactly one final markdown review.
 Do not spawn additional agents.
 ```
 
-7. Return:
+8. Return:
 - the adjudicated final review
 - a short consensus note that states reviewer count used and any failed agents
 
-8. Verification before returning:
+9. Verification before returning:
 - confirm every surviving finding is supported by the canonical diff packet
 - confirm reviewer failures are mentioned in the consensus note
 - confirm the response contains exactly one markdown review plus one short consensus note
