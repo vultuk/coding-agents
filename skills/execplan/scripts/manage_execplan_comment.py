@@ -272,7 +272,7 @@ def split_evidence_entries(content: str) -> list[str]:
     if not stripped:
         return []
     parts = re.split(r"\n{2,}(?=- slice: )", stripped)
-    return [part.strip() for part in parts if part.strip()]
+    return [part.strip() for part in parts if part.strip().startswith("- slice: ")]
 
 
 def upsert_evidence(content: str, entry: dict[str, str]) -> str:
@@ -330,18 +330,23 @@ def record_slice_command(args: argparse.Namespace) -> None:
     progress = upsert_progress_item(progress, args.slice_id, args.summary, args.state, args.time)
     text = replace_section(text, "Progress", progress)
 
-    entry = {
-        "slice": args.slice_id,
-        "time": args.time,
-        "kind": args.kind,
-        "action": args.action,
-        "cwd": args.cwd,
-        "result": args.result,
-        "proof": args.proof,
-    }
-    audit_evidence = get_section(text, "Audit Evidence")
-    audit_evidence = upsert_evidence(audit_evidence, entry)
-    text = replace_section(text, "Audit Evidence", audit_evidence)
+    if args.state == "done":
+        if not all([args.time, args.kind, args.action, args.cwd, args.result, args.proof]):
+            raise SystemExit(
+                "Completed slices require --time, --kind, --action, --cwd, --result, and --proof."
+            )
+        entry = {
+            "slice": args.slice_id,
+            "time": args.time,
+            "kind": args.kind,
+            "action": args.action,
+            "cwd": args.cwd,
+            "result": args.result,
+            "proof": args.proof,
+        }
+        audit_evidence = get_section(text, "Audit Evidence")
+        audit_evidence = upsert_evidence(audit_evidence, entry)
+        text = replace_section(text, "Audit Evidence", audit_evidence)
     write_text(Path(args.output or args.input), text)
 
 
@@ -399,12 +404,12 @@ def build_parser() -> argparse.ArgumentParser:
     record_slice.add_argument("--slice-id", required=True, help="Stable progress slice identifier, for example EP-001.")
     record_slice.add_argument("--summary", required=True, help="Human-readable summary for the progress item.")
     record_slice.add_argument("--state", choices=["pending", "done"], required=True, help="Progress state to render.")
-    record_slice.add_argument("--time", required=True, help="UTC ISO 8601 timestamp for the completed slice and evidence entry.")
-    record_slice.add_argument("--kind", choices=["context", "implementation", "validation", "review", "blocker", "delivery"], required=True)
-    record_slice.add_argument("--action", required=True, help="Command or action that produced this evidence.")
-    record_slice.add_argument("--cwd", required=True, help="Working directory for the command or action.")
-    record_slice.add_argument("--result", required=True, help="Concise result summary.")
-    record_slice.add_argument("--proof", required=True, help="Concrete proof, output snippet, or artifact reference.")
+    record_slice.add_argument("--time", help="UTC ISO 8601 timestamp for the completed slice and evidence entry.")
+    record_slice.add_argument("--kind", choices=["context", "implementation", "validation", "review", "blocker", "delivery"])
+    record_slice.add_argument("--action", help="Command or action that produced this evidence.")
+    record_slice.add_argument("--cwd", help="Working directory for the command or action.")
+    record_slice.add_argument("--result", help="Concise result summary.")
+    record_slice.add_argument("--proof", help="Concrete proof, output snippet, or artifact reference.")
     record_slice.set_defaults(func=record_slice_command)
 
     set_delivery = subparsers.add_parser("set-delivery", help="Render the delivery metadata section deterministically.")

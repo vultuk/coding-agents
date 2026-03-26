@@ -1,6 +1,8 @@
 # GitHub ExecPlan Comment Workflow
 
-Use this reference when the repository does not provide a stricter local ExecPlan format. It adapts the normal file-backed ExecPlan rules to a GitHub issue comment that is edited in place.
+Use this reference when the repository does not provide a stricter local ExecPlan format. It adapts the normal file-backed ExecPlan rules to a GitHub issue comment that is edited in place and treated as the audit log.
+
+The helper script for deterministic comment maintenance lives at [`../scripts/manage_execplan_comment.py`](../scripts/manage_execplan_comment.py).
 
 ## Claim the Issue First
 
@@ -26,73 +28,79 @@ Both commands are safe to re-run. GitHub keeps a single reaction per user/conten
 
 ## Required Comment Shape
 
-The entire managed comment body must be plain Markdown, not a fenced code block:
+The entire managed comment body must be plain Markdown, not a fenced code block. Keep the existing managed marker exactly as:
 
     <!-- execplan:managed -->
-    # <Short, action-oriented description>
 
-    This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
+Add a hidden metadata block near the top of the comment:
 
-    If the repository contains `.agent/PLANS.md`, name that file here and state that this comment must be maintained in accordance with it.
+    <!-- execplan:meta:start -->
+    {
+      "branch": null,
+      "commentId": 987654321,
+      "commit": null,
+      "handoff": {
+        "commentId": null,
+        "status": "pending"
+      },
+      "issue": 103,
+      "issueAuthor": "octocat",
+      "lastSyncedAt": "2026-03-26T14:05:00Z",
+      "mode": "planning",
+      "planRevision": 1,
+      "pr": {
+        "number": null,
+        "url": null
+      },
+      "repo": "owner/repo",
+      "reviewGate": {
+        "blockers": [],
+        "fixesApplied": false,
+        "reviewedAt": null,
+        "status": "pending",
+        "summary": null
+      },
+      "status": "in_progress",
+      "validation": {
+        "commands": [],
+        "status": "pending",
+        "summary": null
+      }
+    }
+    <!-- execplan:meta:end -->
 
-    ## Purpose / Big Picture
+The managed comment must always contain these sections:
 
-    Explain what a user can do after the change and how to see it working.
+- `Progress`
+- `Surprises & Discoveries`
+- `Decision Log`
+- `Outcomes & Retrospective`
+- `Context and Orientation`
+- `Plan of Work`
+- `Concrete Steps`
+- `Validation and Acceptance`
+- `Idempotence and Recovery`
+- `Artifacts and Notes`
+- `Interfaces and Dependencies`
+- `Audit Evidence`
+- `Delivery Metadata`
 
-    ## Progress
+`Progress` is the authoritative completion log. Every item needs a stable slice ID:
 
-    - [x] (2026-03-12 10:00Z) Example completed step.
-    - [ ] Example incomplete step.
-    - [ ] Example partially completed step (completed: X; remaining: Y).
+    - [ ] EP-001 Implement config parser
+    - [x] EP-001 (2026-03-26T14:05:00Z) Implement config parser
 
-Completion is recorded only by changing the matching line in `## Progress` from `- [ ] ...` to `- [x] (timestamp) ...`. Mentioning a finished step anywhere else in the comment does not count unless the checkbox itself is updated.
+`Audit Evidence` must contain one matching entry for every completed slice:
 
-    ## Surprises & Discoveries
+    - slice: EP-001
+      time: 2026-03-26T14:05:00Z
+      kind: validation
+      action: pytest tests/test_execplan.py -q
+      cwd: /workspace/repo
+      result: Passed
+      proof: 7 tests passed in 0.41s
 
-    - Observation: ...
-      Evidence: ...
-
-    ## Decision Log
-
-    - Decision: ...
-      Rationale: ...
-      Date/Author: ...
-
-    ## Outcomes & Retrospective
-
-    Summarize outcomes, gaps, and lessons learned.
-
-    ## Context and Orientation
-
-    Describe the relevant repository areas as if the reader knows nothing.
-
-    ## Plan of Work
-
-    Describe the sequence of edits in prose.
-
-    ## Concrete Steps
-
-    State the exact commands to run, where to run them, and short expected outputs.
-
-    ## Validation and Acceptance
-
-    Describe how to prove the change works.
-
-    ## Idempotence and Recovery
-
-    Explain how to retry safely and how to roll back risky steps.
-
-    ## Artifacts and Notes
-
-    Include concise transcripts, diffs, or snippets that prove progress.
-
-    ## Interfaces and Dependencies
-
-    Name the modules, services, functions, commands, or APIs that must exist or be used.
-
-    Revision note: 2026-03-12 by Codex. Created the initial issue-backed ExecPlan and chose GitHub comment storage so the issue remains the source of truth.
-
-Keep the plan prose-first. Use checklists only in `Progress`, where they are mandatory.
+Use UTC ISO 8601 timestamps everywhere in the audit trail.
 
 ## Read Issue and Repository Context
 
@@ -117,24 +125,78 @@ Find the newest managed ExecPlan comment on the issue:
 
 If `COMMENT_ID` is empty, no managed ExecPlan comment exists yet.
 
-## Create the Managed Comment
+## Create or Enrich the Managed Comment
 
-Prepare the comment body in a temporary file. Do not store the plan as a repository file.
+Prepare metadata in a temporary file:
 
-    PLAN_FILE=$(mktemp)
-    cat > "$PLAN_FILE" <<'EOF'
-    <!-- execplan:managed -->
-    # Implement issue #103
-    ...
+    META_FILE=$(mktemp)
+    cat > "$META_FILE" <<EOF
+    {
+      "issue": $ISSUE,
+      "repo": "$REPO",
+      "mode": "planning",
+      "status": "in_progress",
+      "issueAuthor": "${ISSUE_AUTHOR:-}",
+      "commentId": null,
+      "planRevision": 1,
+      "lastSyncedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+      "branch": null,
+      "commit": null,
+      "pr": {
+        "number": null,
+        "url": null
+      },
+      "reviewGate": {
+        "status": "pending",
+        "reviewedAt": null,
+        "summary": null,
+        "fixesApplied": false,
+        "blockers": []
+      },
+      "validation": {
+        "status": "pending",
+        "summary": null,
+        "commands": []
+      },
+      "handoff": {
+        "commentId": null,
+        "status": "pending"
+      }
+    }
     EOF
 
-Create the comment and capture its identifier:
+Create a new local plan skeleton or enrich an existing one in place:
 
-    COMMENT_ID=$(gh api "repos/$REPO/issues/$ISSUE/comments" \
-      -F "body=@$PLAN_FILE" \
-      --jq '.id')
+    PLAN_FILE=$(mktemp)
+    if [ -n "$COMMENT_ID" ]; then
+      gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$PLAN_FILE"
+    else
+      printf '%s\n' '<!-- execplan:managed -->' '# Implement issue #103' > "$PLAN_FILE"
+    fi
 
-Delete the temp file after the request succeeds or fails.
+    python3 skills/execplan/scripts/manage_execplan_comment.py normalize \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --meta-file "$META_FILE"
+
+If the comment already existed without a metadata block, `normalize` enriches it in place. It preserves prior prose and appends any missing required sections without rewriting the full history.
+
+Create the comment and capture its identifier when needed:
+
+    if [ -z "$COMMENT_ID" ]; then
+      COMMENT_ID=$(gh api "repos/$REPO/issues/$ISSUE/comments" \
+        -F "body=@$PLAN_FILE" \
+        --jq '.id')
+    fi
+
+Patch the metadata block with the resolved `commentId` after creation:
+
+    python3 skills/execplan/scripts/manage_execplan_comment.py normalize \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --meta-json "{\"commentId\": $COMMENT_ID, \"lastSyncedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}"
 
 After the managed comment exists, remove the temporary `👀` reaction and add the `in progress` label:
 
@@ -156,70 +218,107 @@ After the managed comment exists, remove the temporary `👀` reaction and add t
     fi
     gh issue edit "$ISSUE" --add-label "in progress"
 
-## Edit the Managed Comment
+## Conflict-Safe Comment Updates
 
-Before editing, fetch the current remote copy again if any time has passed or code work has completed. This avoids clobbering newer edits.
+No long-lived local copy of the plan is authoritative. Before every edit:
 
-During execution, do not keep a long-lived local copy of the plan body. Before each progress update, refresh the temporary file from the managed comment so the next patch starts from the latest remote state:
+1. Fetch the latest remote body and `updated_at`.
+2. Rebuild the local temp file from that body.
+3. Apply deterministic updates locally with the helper script.
+4. Re-check `updated_at` before patching.
+5. If it changed, rebuild against the fresh remote body and retry once.
+6. If it changes again, stop and record a blocker rather than risking an overwrite.
 
-    gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$PLAN_FILE"
+Example conflict-safe patch flow:
 
-Update the temporary file with the latest complete plan body, then patch the comment:
+    fetch_plan() {
+      gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$PLAN_FILE"
+      gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.updated_at'
+    }
+
+    FIRST_UPDATED_AT=$(fetch_plan)
+
+    python3 skills/execplan/scripts/manage_execplan_comment.py normalize \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --meta-json "{\"planRevision\": 2, \"lastSyncedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}"
+
+    CURRENT_UPDATED_AT=$(gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.updated_at')
+    if [ "$CURRENT_UPDATED_AT" != "$FIRST_UPDATED_AT" ]; then
+      SECOND_UPDATED_AT=$(fetch_plan)
+      python3 skills/execplan/scripts/manage_execplan_comment.py normalize \
+        --input "$PLAN_FILE" \
+        --output "$PLAN_FILE" \
+        --title "Implement issue #$ISSUE" \
+        --meta-json "{\"planRevision\": 2, \"lastSyncedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}"
+      CURRENT_UPDATED_AT=$(gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.updated_at')
+      if [ "$CURRENT_UPDATED_AT" != "$SECOND_UPDATED_AT" ]; then
+        echo "Remote managed comment changed twice. Stop and record a blocker instead of patching." >&2
+        exit 1
+      fi
+    fi
 
     gh api "repos/$REPO/issues/comments/$COMMENT_ID" \
       -X PATCH \
       -F "body=@$PLAN_FILE" \
       >/dev/null
 
-After each execution-time patch, re-fetch the managed comment and verify the intended checkbox is now checked in the remote `## Progress` section before continuing work:
+After each execution-time patch, re-fetch the comment and confirm the intended `Progress` checkbox and matching `Audit Evidence` entry are visible remotely before continuing work.
 
-    gh api "repos/$REPO/issues/comments/$COMMENT_ID" --jq '.body' > "$PLAN_FILE"
+## Record Progress and Evidence Deterministically
 
-If this is the first successful creation of the managed comment and the `👀` reaction is still present, run the cleanup-and-label step above after the patch succeeds.
+During execution, split the work into granular `Progress` items before code changes begin for a slice. Do not batch several completed items and update them later.
 
-## Execution Rules
+Add the next unchecked slice before implementation starts:
 
-During implementation, the GitHub comment replaces the local `.md` plan file. Keep it updated with the same discipline as a file-backed ExecPlan:
+    python3 skills/execplan/scripts/manage_execplan_comment.py record-slice \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --slice-id EP-002 \
+      --summary "Run focused validation for the parser changes" \
+      --state pending
 
-- Split work into granular `Progress` items before implementation starts.
-- Ensure every independently observable work slice has its own checkbox in `## Progress` before code changes begin for that slice.
-- Update the GitHub comment immediately after each individual `Progress` item is completed.
-- Do not wait until the end of a milestone or the end of the task to publish accumulated progress.
-- Treat a work slice as incomplete until the remote comment shows its checkbox changed to `- [x]` with a timestamp.
-- Record unexpected findings in `Surprises & Discoveries`.
-- Record design changes in `Decision Log`.
-- Record milestone outcomes in `Outcomes & Retrospective`.
-- Add a new revision note at the bottom every time the plan materially changes.
-- Do not use notes in other sections as a substitute for flipping the matching checkbox in `## Progress`.
+Update the local plan file for one completed slice:
 
-Do not create extra comments for routine progress. The managed comment is the authoritative log.
+    python3 skills/execplan/scripts/manage_execplan_comment.py record-slice \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --meta-json "{\"mode\": \"execution\", \"status\": \"in_progress\", \"lastSyncedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"}" \
+      --slice-id EP-002 \
+      --summary "Run focused validation for the parser changes" \
+      --state done \
+      --time "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      --kind validation \
+      --action "pytest tests/test_parser.py -q" \
+      --cwd "$PWD" \
+      --result "Passed" \
+      --proof "7 tests passed in 0.41s"
 
-The only extra issue comment allowed by this workflow is one final completion handoff comment after the PR has been created so the original issue author is explicitly notified. That handoff must be idempotent across retries and resumptions: use a stable marker in the comment body, detect an existing handoff comment authored by the current user, and update it in place instead of posting duplicates.
+This updates the exact `Progress` line keyed by `EP-002` and creates or replaces the matching `Audit Evidence` entry for that slice.
 
-Use this execution loop:
+## Review Gate
 
-1. Read the latest managed comment.
-2. Pick one unchecked `Progress` item. If the next work slice does not yet have a checkbox, add it to `## Progress` and publish that update before writing code.
-3. Complete only that unit of work.
-4. Run the validation that proves that unit is complete.
-5. Patch the managed comment immediately by changing that exact `Progress` line from `- [ ]` to `- [x] (timestamp) ...` and updating any related sections.
-6. Re-fetch the managed comment and confirm the remote `## Progress` section now shows the checked item.
-7. Repeat with the next unchecked item.
+Before the first commit is created, run the `review-changes` skill against the current local diff as a required pre-flight review. Treat the adjudicated output as binding for delivery:
 
-Before the first commit is created, run the `review-changes` skill against the current local diff as a required pre-flight review. Treat the adjudicated output as binding for delivery: fix every `Must fix (blocking)` and `Should fix (important)` finding that can be resolved safely within the issue scope, update the managed comment with the fixes or blockers, and re-run the review if the diff changes materially.
+1. Fix every `Must fix (blocking)` and `Should fix (important)` item that is in scope and safe to resolve.
+2. Re-run the relevant validation commands.
+3. Re-run `review-changes` if the local diff changed.
+4. Do not commit, push, or open a PR while blocking or important findings remain unresolved unless the managed comment clearly records the blocker, why it could not be resolved now, and what follow-up is required.
+
+Capture the review gate in both metadata and prose. At minimum, update:
+
+- `reviewGate.status`
+- `reviewGate.reviewedAt`
+- `reviewGate.summary`
+- `reviewGate.fixesApplied`
+- `reviewGate.blockers`
 
 ## Finalize the Delivery
 
-When all unchecked `Progress` items are complete and validation passes, do not stop at a local diff. Finish the GitHub delivery loop. This is mandatory for execution mode: the run is not complete until the changes are committed, pushed, turned into a PR, and handed back on the issue thread, or until a concrete blocker is recorded.
-
-Run the pre-commit review gate before creating the branch or commit:
-
-1. Invoke the `review-changes` skill on the current local diff.
-2. Read the adjudicated review, not the individual reviewer drafts, and capture the result in the managed comment.
-3. Fix every `Must fix (blocking)` and `Should fix (important)` item that is in scope and safe to resolve.
-4. Re-run the relevant validation commands.
-5. Re-run `review-changes` if the local diff changed.
-6. Do not commit, push, or open a PR while any `Must fix (blocking)` or `Should fix (important)` item remains unresolved unless the managed comment clearly records the blocker, why it could not be resolved now, and what follow-up is required.
+When all unchecked `Progress` items are complete and validation passes, do not stop at a local diff. Finish the GitHub delivery loop.
 
 Create a branch using the repository naming convention:
 
@@ -286,9 +385,9 @@ Request review from the original issue author when possible:
       REVIEWER_REQUEST_STATUS="Skipped reviewer request because the issue author matches the current user or could not be resolved."
     fi
 
-If the reviewer request fails because the issue author cannot be requested in that repository, do not delete or recreate the PR. Keep the PR open, capture `REVIEWER_REQUEST_STATUS` in `Artifacts and Notes` or `Outcomes & Retrospective`, and mention it in the final user-facing report. If `ISSUE_AUTHOR` equals `VIEWER`, record that self-review was not requested.
+## Render and Upsert the Final Handoff Comment
 
-Create or update the final completion handoff comment on the issue so the owner is explicitly notified from the issue thread itself without creating duplicates on retries:
+Render a stable handoff body with the fixed marker `<!-- execplan:handoff -->`:
 
     COMMIT_SHA=$(git rev-parse HEAD)
     VALIDATION_STATUS=${VALIDATION_STATUS:-}
@@ -296,36 +395,21 @@ Create or update the final completion handoff comment on the issue so the owner 
       echo "VALIDATION_STATUS must describe the validation that passed before posting the handoff comment." >&2
       exit 1
     fi
-    OWNER_NOTIFICATION_STATUS="Updated completion handoff comment without a direct owner mention."
+
     HANDOFF_BODY=$(mktemp)
-    HANDOFF_MARKER="<!-- execplan-handoff:$ISSUE -->"
-    if [ -n "$ISSUE_AUTHOR" ] && [ "$ISSUE_AUTHOR" != "$VIEWER" ]; then
-      OWNER_NOTIFICATION_STATUS="Updated completion handoff comment tagging @$ISSUE_AUTHOR."
-      cat > "$HANDOFF_BODY" <<EOF
-    $HANDOFF_MARKER
-    @$ISSUE_AUTHOR implementation for #$ISSUE is complete and ready for review.
+    python3 skills/execplan/scripts/manage_execplan_comment.py render-handoff \
+      --issue "$ISSUE" \
+      --issue-author "${ISSUE_AUTHOR:-}" \
+      --viewer "$VIEWER" \
+      --pr "$PR_URL" \
+      --branch "$BRANCH" \
+      --commit "$COMMIT_SHA" \
+      --validation "$VALIDATION_STATUS" \
+      --output "$HANDOFF_BODY"
 
-    - PR: $PR_URL
-    - Branch: $BRANCH
-    - Commit: $COMMIT_SHA
-    - Validation: $VALIDATION_STATUS
+Upsert that comment in place on retries:
 
-    The managed ExecPlan comment has been updated with the full delivery log.
-    EOF
-    else
-      OWNER_NOTIFICATION_STATUS="Updated completion handoff comment without a direct owner mention because the issue author matches the current user or could not be resolved."
-      cat > "$HANDOFF_BODY" <<EOF
-    $HANDOFF_MARKER
-    Implementation for #$ISSUE is complete and ready for review.
-
-    - PR: $PR_URL
-    - Branch: $BRANCH
-    - Commit: $COMMIT_SHA
-    - Validation: $VALIDATION_STATUS
-
-    The managed ExecPlan comment has been updated with the full delivery log.
-    EOF
-    fi
+    HANDOFF_MARKER="<!-- execplan:handoff -->"
     HANDOFF_COMMENT_ID=$(gh api "repos/$REPO/issues/$ISSUE/comments" \
       --paginate \
       --jq '.[] | select(.user.login == env.VIEWER and (.body | contains(env.HANDOFF_MARKER))) | .id' \
@@ -335,20 +419,34 @@ Create or update the final completion handoff comment on the issue so the owner 
         -X PATCH \
         -F "body=@$HANDOFF_BODY" \
         >/dev/null
+      OWNER_NOTIFICATION_STATUS="Updated existing handoff comment."
     else
       gh issue comment "$ISSUE" --body-file "$HANDOFF_BODY" >/dev/null
+      HANDOFF_COMMENT_ID=$(gh api "repos/$REPO/issues/$ISSUE/comments" \
+        --paginate \
+        --jq '.[] | select(.user.login == env.VIEWER and (.body | contains(env.HANDOFF_MARKER))) | .id' \
+        | tail -n 1)
+      OWNER_NOTIFICATION_STATUS="Created new handoff comment."
     fi
 
-Update the managed issue comment again after PR creation so the issue itself records the final traceability details:
+## Update Delivery Metadata
 
-    # Refresh PLAN_FILE with the latest Markdown plan content, including:
-    # - completed Progress entries
-    # - validation results
-    # - branch name
-    # - commit hash
-    # - PR URL
-    # - reviewer request status from REVIEWER_REQUEST_STATUS
-    # - owner notification status from OWNER_NOTIFICATION_STATUS
+After PR creation, update the managed issue comment again so the issue records the final traceability details:
+
+    python3 skills/execplan/scripts/manage_execplan_comment.py set-delivery \
+      --input "$PLAN_FILE" \
+      --output "$PLAN_FILE" \
+      --title "Implement issue #$ISSUE" \
+      --meta-json "{\"branch\": \"$BRANCH\", \"commit\": \"$COMMIT_SHA\", \"pr\": {\"url\": \"$PR_URL\"}, \"lastSyncedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\", \"handoff\": {\"commentId\": ${HANDOFF_COMMENT_ID:-null}, \"status\": \"complete\"}, \"validation\": {\"status\": \"passed\", \"summary\": \"$VALIDATION_STATUS\"}}" \
+      --branch "$BRANCH" \
+      --commit "$COMMIT_SHA" \
+      --pr "$PR_URL" \
+      --reviewer-status "$REVIEWER_REQUEST_STATUS" \
+      --handoff-status "$OWNER_NOTIFICATION_STATUS" \
+      --validation-summary "$VALIDATION_STATUS"
+
+Patch the managed comment with the refreshed body:
+
     gh api "repos/$REPO/issues/comments/$COMMENT_ID" \
       -X PATCH \
       -F "body=@$PLAN_FILE" \
@@ -365,6 +463,7 @@ If the repository uses a non-`main` default branch or already has a stricter PR 
 If GitHub API writes fail:
 
 1. Keep the current plan text in a temporary file.
-2. Retry the `gh api` request after re-fetching `COMMENT_ID` and issue state.
-3. If retries keep failing, tell the user the issue comment could not be updated and include the exact failure point.
-4. Do not silently fall back to a local permanent plan file unless the user explicitly approves that change in storage model.
+2. Retry the `gh api` request after re-fetching `COMMENT_ID`, `updated_at`, and issue state.
+3. If the remote comment changed unexpectedly, rebuild the edit against the latest body before retrying.
+4. If retries keep failing, tell the user the issue comment could not be updated and include the exact failure point.
+5. Do not silently fall back to a local permanent plan file unless the user explicitly approves that change in storage model.
