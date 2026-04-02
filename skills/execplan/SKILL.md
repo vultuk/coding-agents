@@ -7,6 +7,8 @@ description: Create and execute living ExecPlans stored in GitHub issue comments
 
 Use this skill to manage a living ExecPlan inside one machine-managed GitHub issue comment. The GitHub thread is the audit log, not a secondary summary. The managed comment must stay current enough that another stateless agent or reviewer can reconstruct what happened from GitHub alone.
 
+This skill should follow the spirit of the official Codex Exec Plans guide at [developers.openai.com/cookbook/articles/codex_exec_plans](https://developers.openai.com/cookbook/articles/codex_exec_plans), while adapting the storage model to a managed GitHub issue comment instead of a local `PLANS.md` file.
+
 ## Require Inputs and Preconditions
 
 - Require a GitHub issue number.
@@ -84,6 +86,20 @@ Use the helper at [`scripts/manage_execplan_comment.py`](scripts/manage_execplan
 
 Existing managed comments remain valid. On the next update, enrich them in place by adding the metadata block, `Audit Evidence`, `Delivery Metadata`, and slice IDs for new progress items. Preserve prior history rather than rewriting it.
 
+## Plan Quality Bar
+
+The visible comment should read like a good ExecPlan from the official guide, not like a template dump.
+
+- Lead with the problem, the intended outcome, and the repository context before listing steps.
+- Prefer short prose paragraphs for `Context and Orientation` and `Plan of Work`. Use bullets only where they materially improve scanability.
+- Keep the initial plan lean. A healthy starting point is usually 2 to 5 independently verifiable slices, not a checklist for every clerical workflow step.
+- Do not bundle review, commit, push, PR creation, and handoff into one giant progress slice. Track delivery in metadata unless it is a real remaining milestone.
+- Avoid filler such as `None yet`, `Pending`, or speculative retrospective text unless there is genuinely nothing to say; when needed, keep it to one short line.
+- Do not duplicate the same information across `Context and Orientation`, `Plan of Work`, and `Concrete Steps`.
+- Use repository-relative paths in visible prose. Never paste machine-local absolute paths, Codex worktree paths, or user-home paths into the GitHub comment.
+- When a working directory is needed in visible content or audit evidence, prefer `<repo-root>` or a repository-relative subdirectory.
+- Name concrete files, modules, types, commands, and validation checks precisely enough that another agent can continue without re-discovery.
+
 ## Progress and Audit Evidence Rules
 
 The `Progress` section is the only authoritative completion log.
@@ -110,6 +126,8 @@ Every completed slice must add one matching entry in `## Audit Evidence` with th
 Allowed `kind` values are `context`, `implementation`, `validation`, `review`, `blocker`, and `delivery`.
 
 Use the helper script to update progress and evidence together so the audit trail stays synchronized.
+
+Each slice should be independently verifiable. Prefer slices such as `Add regression coverage for disabled-provider summaries` or `Update summary aggregation to exclude manual-off providers`, not broad bundles such as `Run review gate, resolve findings, and deliver`.
 
 ## Choose the Operating Mode
 
@@ -183,6 +201,8 @@ Use [`scripts/manage_execplan_comment.py`](scripts/manage_execplan_comment.py) t
   Generates the stable final issue comment body with `<!-- execplan:handoff -->`.
 
 Prefer the helper for structure updates and repeated audit operations. It does not replace the need to re-fetch the remote GitHub comment before patching.
+
+Before posting or patching the managed comment, run `python3 skills/execplan/scripts/manage_execplan_comment.py lint --input "$PLAN_FILE"` to catch obvious visible-content mistakes such as machine-local absolute paths.
 
 ## Grounding and Safety Rules
 

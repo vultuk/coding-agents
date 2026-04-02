@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deterministic helpers for audit-heavy ExecPlan GitHub comments.
+Deterministic helpers for GitHub-hosted ExecPlan comments.
 
 This script keeps the machine-managed portions of an ExecPlan comment stable:
 - the hidden metadata block
@@ -43,20 +43,27 @@ SECTION_ORDER = [
 ]
 
 SECTION_TEMPLATES = {
-    "Progress": "- [ ] EP-001 Replace with the next independently verifiable slice.",
-    "Surprises & Discoveries": "- Observation: None yet.\n  Evidence: Add concrete proof when something unexpected appears.",
-    "Decision Log": "- Decision: Not recorded yet.\n  Rationale: Replace when a real design choice is made.\n  Date/Author: 1970-01-01T00:00:00Z / pending",
-    "Outcomes & Retrospective": "Summarize outcomes, remaining gaps, and lessons learned as the work progresses.",
-    "Context and Orientation": "Describe the relevant repository areas as if the reader has no prior context.",
-    "Plan of Work": "Describe the planned sequence of changes in prose before implementation starts.",
-    "Concrete Steps": "State the exact commands to run, where to run them, and the expected success signals.",
-    "Validation and Acceptance": "Describe how to prove the change works. Record only checks that actually ran.",
-    "Idempotence and Recovery": "Document safe retry steps, conflict handling, and any rollback path for risky operations.",
-    "Artifacts and Notes": "Include concise transcripts, diffs, or snippets that prove progress without replacing the `Progress` checkboxes.",
-    "Interfaces and Dependencies": "Name the modules, services, functions, commands, or APIs that this work depends on.",
-    "Audit Evidence": "Record one entry per completed slice using the fields `slice`, `time`, `kind`, `action`, `cwd`, `result`, and `proof`.",
+    "Progress": "- [ ] EP-001 Define the first independently verifiable slice.",
+    "Surprises & Discoveries": "- None yet.",
+    "Decision Log": "- None yet.",
+    "Outcomes & Retrospective": "Pending.",
+    "Context and Orientation": "Pending.",
+    "Plan of Work": "Pending.",
+    "Concrete Steps": "Pending.",
+    "Validation and Acceptance": "Pending.",
+    "Idempotence and Recovery": "Pending.",
+    "Artifacts and Notes": "None yet.",
+    "Interfaces and Dependencies": "Pending.",
+    "Audit Evidence": "None yet.",
     "Delivery Metadata": "- Branch: pending\n- Commit: pending\n- PR: pending\n- Reviewer request: pending\n- Handoff: pending\n- Validation: pending",
 }
+
+VISIBLE_PATH_PATTERNS = [
+    re.compile(r"/Users/[^\s)]+"),
+    re.compile(r"/home/[^\s)]+"),
+    re.compile(r"[A-Za-z]:\\\\Users\\\\[^\s)]+"),
+    re.compile(r"/\.codex/worktrees/[^\s)]+"),
+]
 
 
 def default_metadata() -> dict:
@@ -163,6 +170,11 @@ def insert_metadata_block(text: str, metadata: dict) -> str:
             marker_end = marker_pos + len(MANAGED_MARKER)
             updated = stripped[:marker_end] + "\n\n" + block + stripped[marker_end:]
     return updated.replace("\n\n\n", "\n\n").rstrip() + "\n"
+
+
+def strip_visible_metadata(text: str) -> str:
+    stripped, _ = strip_metadata_block(text)
+    return stripped
 
 
 def parse_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
@@ -303,6 +315,25 @@ def render_delivery_metadata(args: argparse.Namespace) -> str:
     )
 
 
+def lint_visible_content(text: str) -> list[str]:
+    visible = strip_visible_metadata(text)
+    issues: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for pattern in VISIBLE_PATH_PATTERNS:
+        match = pattern.search(visible)
+        if match:
+            start, end = match.span()
+            if any(not (end <= existing_start or start >= existing_end) for existing_start, existing_end in spans):
+                continue
+            spans.append((start, end))
+            issues.append(
+                "Visible plan content contains a machine-local absolute path. "
+                "Use <repo-root> and repository-relative paths in the GitHub comment instead: "
+                f"{match.group(0)}"
+            )
+    return issues
+
+
 def load_metadata_updates(args: argparse.Namespace) -> dict:
     updates: dict = {}
     if getattr(args, "meta_file", None):
@@ -383,8 +414,17 @@ def render_handoff_command(args: argparse.Namespace) -> None:
         sys.stdout.write(body)
 
 
+def lint_command(args: argparse.Namespace) -> None:
+    path = Path(args.input)
+    issues = lint_visible_content(read_text(path))
+    if issues:
+        for issue in issues:
+            print(issue, file=sys.stderr)
+        raise SystemExit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Deterministic helpers for audit-heavy ExecPlan comments.")
+    parser = argparse.ArgumentParser(description="Deterministic helpers for GitHub-hosted ExecPlan comments.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     normalize = subparsers.add_parser("normalize", help="Ensure the managed comment header, metadata block, and required sections exist.")
@@ -436,6 +476,10 @@ def build_parser() -> argparse.ArgumentParser:
     render_handoff.add_argument("--validation", required=True)
     render_handoff.add_argument("--output", help="Output file path. Defaults to stdout.")
     render_handoff.set_defaults(func=render_handoff_command)
+
+    lint = subparsers.add_parser("lint", help="Reject common GitHub comment mistakes such as machine-local absolute paths.")
+    lint.add_argument("--input", required=True, help="Input markdown file path.")
+    lint.set_defaults(func=lint_command)
 
     return parser
 
