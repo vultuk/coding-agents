@@ -1,6 +1,6 @@
 # GitHub ExecPlan Comment Workflow
 
-Use this reference when the repository does not provide a stricter local ExecPlan format. It adapts the normal file-backed ExecPlan rules to a GitHub issue comment that is edited in place and treated as the audit log.
+Use this reference when the repository does not provide a stricter local ExecPlan format. It adapts the official Codex Exec Plans guidance from [developers.openai.com/cookbook/articles/codex_exec_plans](https://developers.openai.com/cookbook/articles/codex_exec_plans) to a GitHub issue comment that is edited in place and treated as the audit log.
 
 The helper script for deterministic comment maintenance lives at [`../scripts/manage_execplan_comment.py`](../scripts/manage_execplan_comment.py).
 
@@ -85,6 +85,15 @@ The managed comment must always contain these sections:
 - `Audit Evidence`
 - `Delivery Metadata`
 
+Unlike the file-backed guide, the GitHub version stays plain Markdown so the managed marker, hidden metadata block, and required sections remain machine-editable. The visible prose should still follow the guide's quality bar:
+
+- Start with the outcome and relevant repository context, not generic template narration.
+- Prefer short paragraphs over bullet spam outside `Progress` and `Delivery Metadata`.
+- Keep the initial plan to a small set of independently verifiable slices.
+- Use repository-relative paths in visible prose and `<repo-root>` when a working directory matters.
+- Never include local worktree paths such as `/Users/...` or `~/.codex/worktrees/...` in the GitHub comment body.
+- Do not repeat the same information across `Context and Orientation`, `Plan of Work`, and `Concrete Steps`.
+
 `Progress` is the authoritative completion log. Every item needs a stable slice ID:
 
     - [ ] EP-001 Implement config parser
@@ -96,7 +105,7 @@ The managed comment must always contain these sections:
       time: 2026-03-26T14:05:00Z
       kind: validation
       action: pytest tests/test_execplan.py -q
-      cwd: /workspace/repo
+      cwd: <repo-root>
       result: Passed
       proof: 7 tests passed in 0.41s
 
@@ -181,6 +190,11 @@ Create a new local plan skeleton or enrich an existing one in place:
       --meta-file "$META_FILE"
 
 If the comment already existed without a metadata block, `normalize` enriches it in place. It preserves prior prose and appends any missing required sections without rewriting the full history.
+
+Before posting a new or refreshed plan body, lint the visible content:
+
+    python3 skills/execplan/scripts/manage_execplan_comment.py lint \
+      --input "$PLAN_FILE"
 
 Create the comment and capture its identifier when needed:
 
@@ -268,7 +282,7 @@ After each execution-time patch, re-fetch the comment and confirm the intended `
 
 ## Record Progress and Evidence Deterministically
 
-During execution, split the work into granular `Progress` items before code changes begin for a slice. Do not batch several completed items and update them later.
+During execution, split the work into granular `Progress` items before code changes begin for a slice. Do not batch several completed items and update them later. A good slice captures one outcome that another agent could verify without interpreting several unrelated changes at once.
 
 Add the next unchecked slice before implementation starts:
 
