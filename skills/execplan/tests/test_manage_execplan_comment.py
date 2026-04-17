@@ -43,6 +43,87 @@ class ManageExecplanCommentTests(unittest.TestCase):
         self.assertNotIn("State the exact commands to run, where to run them", body)
         self.assertNotIn("Describe the planned sequence of changes in prose", body)
 
+    def test_normalize_hides_metadata_inside_single_html_comment(self) -> None:
+        self.plan_path.write_text("<!-- execplan:managed -->\n# Implement issue #123\n", encoding="utf-8")
+        args = argparse.Namespace(
+            input=str(self.plan_path),
+            output=None,
+            title="Implement issue #123",
+            meta_file=None,
+            meta_json='{"issue": 123, "repo": "acme/widgets", "commentId": 42}',
+        )
+
+        MODULE.normalize_command(args)
+
+        body = self.plan_path.read_text(encoding="utf-8")
+        self.assertIn('<!-- execplan:meta\n', body)
+        self.assertIn('\n-->\n', body)
+        self.assertNotIn('<!-- execplan:meta:start -->', body)
+        self.assertNotIn('<!-- execplan:meta:end -->', body)
+        self.assertNotIn('  "commentId": 42,', body)
+
+        _, parsed = MODULE.strip_metadata_block(body)
+        self.assertEqual(parsed["commentId"], 42)
+        self.assertEqual(parsed["repo"], "acme/widgets")
+
+    def test_normalize_migrates_legacy_visible_metadata_block(self) -> None:
+        self.plan_path.write_text(
+            "\n".join(
+                [
+                    "<!-- execplan:managed -->",
+                    "# Implement issue #123",
+                    "",
+                    "<!-- execplan:meta:start -->",
+                    '{"issue": 123, "repo": "acme/widgets", "commentId": 42}',
+                    "<!-- execplan:meta:end -->",
+                    "",
+                    "## Context and Orientation",
+                    "Existing prose.",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        args = argparse.Namespace(
+            input=str(self.plan_path),
+            output=None,
+            title="Implement issue #123",
+            meta_file=None,
+            meta_json='{"planRevision": 2}',
+        )
+
+        MODULE.normalize_command(args)
+
+        body = self.plan_path.read_text(encoding="utf-8")
+        self.assertIn('<!-- execplan:meta\n', body)
+        self.assertNotIn('<!-- execplan:meta:start -->', body)
+        self.assertNotIn('<!-- execplan:meta:end -->', body)
+        self.assertNotIn('  "commentId": 42,', body)
+        self.assertNotIn('  "planRevision": 2,', body)
+        self.assertIn('Existing prose.', body)
+
+        _, parsed = MODULE.strip_metadata_block(body)
+        self.assertEqual(parsed["commentId"], 42)
+        self.assertEqual(parsed["planRevision"], 2)
+
+    def test_normalize_hides_metadata_with_html_comment_terminator_in_value(self) -> None:
+        self.plan_path.write_text("<!-- execplan:managed -->\n# Implement issue #123\n", encoding="utf-8")
+        args = argparse.Namespace(
+            input=str(self.plan_path),
+            output=None,
+            title="Implement issue #123",
+            meta_file=None,
+            meta_json='{"issue": 123, "validation": {"summary": "value with --> terminator"}}',
+        )
+
+        MODULE.normalize_command(args)
+
+        body = self.plan_path.read_text(encoding="utf-8")
+        self.assertNotIn("value with --> terminator", body)
+
+        _, parsed = MODULE.strip_metadata_block(body)
+        self.assertEqual(parsed["validation"]["summary"], "value with --> terminator")
+
     def test_record_slice_marks_progress_and_adds_evidence(self) -> None:
         self.plan_path.write_text("<!-- execplan:managed -->\n# Implement issue #123\n", encoding="utf-8")
 

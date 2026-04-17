@@ -32,42 +32,13 @@ The entire managed comment body must be plain Markdown, not a fenced code block.
 
     <!-- execplan:managed -->
 
-Add a hidden metadata block near the top of the comment:
+Add a hidden metadata block near the top of the comment. Keep the metadata inside a single HTML comment, but base64-encode the JSON payload first so GitHub never sees raw `-->` terminators from user-controlled strings:
 
-    <!-- execplan:meta:start -->
-    {
-      "branch": null,
-      "commentId": 987654321,
-      "commit": null,
-      "handoff": {
-        "commentId": null,
-        "status": "pending"
-      },
-      "issue": 103,
-      "issueAuthor": "octocat",
-      "lastSyncedAt": "2026-03-26T14:05:00Z",
-      "mode": "planning",
-      "planRevision": 1,
-      "pr": {
-        "number": null,
-        "url": null
-      },
-      "repo": "owner/repo",
-      "reviewGate": {
-        "blockers": [],
-        "fixesApplied": false,
-        "reviewedAt": null,
-        "status": "pending",
-        "summary": null
-      },
-      "status": "in_progress",
-      "validation": {
-        "commands": [],
-        "status": "pending",
-        "summary": null
-      }
-    }
-    <!-- execplan:meta:end -->
+    <!-- execplan:meta
+    eyJicmFuY2giOiBudWxsLCAiY29tbWVudElkIjogOTg3NjU0MzIxLCAiY29tbWl0IjogbnVsbCwgImhhbmRvZmYiOiB7ImNvbW1lbnRJZCI6IG51bGwsICJzdGF0dXMiOiAicGVuZGluZyJ9LCAiaXNzdWUiOiAxMDMsICJpc3N1ZUF1dGhvciI6ICJvY3RvY2F0IiwgImxhc3RTeW5jZWRBdCI6ICIyMDI2LTAzLTI2VDE0OjA1OjAwWiIsICJtb2RlIjogInBsYW5uaW5nIiwgInBsYW5SZXZpc2lvbiI6IDEsICJwciI6IHsibnVtYmVyIjogbnVsbCwgInVybCI6IG51bGx9LCAicmVwbyI6ICJvd25lci9yZXBvIiwgInJldmlld0dhdGUiOiB7ImJsb2NrZXJzIjogW10sICJmaXhlc0FwcGxpZWQiOiBmYWxzZSwgInJldmlld2VkQXQiOiBudWxsLCAic3RhdHVzIjogInBlbmRpbmciLCAic3VtbWFyeSI6IG51bGx9LCAic3RhdHVzIjogImluX3Byb2dyZXNzIiwgInZhbGlkYXRpb24iOiB7ImNvbW1hbmRzIjogW10sICJzdGF0dXMiOiAicGVuZGluZyIsICJzdW1tYXJ5IjogbnVsbH19
+    -->
+
+The helper script handles encoding and decoding automatically; humans should treat the payload as opaque.
 
 The managed comment must always contain these sections:
 

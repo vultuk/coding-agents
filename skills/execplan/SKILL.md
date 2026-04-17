@@ -59,9 +59,9 @@ The comment must always contain:
 - The managed marker `<!-- execplan:managed -->`.
 - A visible H1 title.
 - A hidden metadata block near the top of the comment:
-  `<!-- execplan:meta:start -->`
+  `<!-- execplan:meta`
   JSON
-  `<!-- execplan:meta:end -->`
+  `-->`
 - These sections, kept current at all times:
   `Progress`, `Surprises & Discoveries`, `Decision Log`, `Outcomes & Retrospective`, `Context and Orientation`, `Plan of Work`, `Concrete Steps`, `Validation and Acceptance`, `Idempotence and Recovery`, `Artifacts and Notes`, `Interfaces and Dependencies`, `Audit Evidence`, `Delivery Metadata`.
 

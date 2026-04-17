@@ -14,6 +14,7 @@ This script keeps the machine-managed portions of an ExecPlan comment stable:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import sys
@@ -22,8 +23,9 @@ from pathlib import Path
 
 
 MANAGED_MARKER = "<!-- execplan:managed -->"
-META_START = "<!-- execplan:meta:start -->"
-META_END = "<!-- execplan:meta:end -->"
+META_MARKER = "<!-- execplan:meta"
+LEGACY_META_START = "<!-- execplan:meta:start -->"
+LEGACY_META_END = "<!-- execplan:meta:end -->"
 HANDOFF_MARKER = "<!-- execplan:handoff -->"
 
 SECTION_ORDER = [
@@ -121,23 +123,46 @@ def write_text(path: Path, text: str) -> None:
 
 def metadata_block(metadata: dict) -> str:
     rendered = json.dumps(metadata, indent=2, sort_keys=True)
-    return f"{META_START}\n{rendered}\n{META_END}"
+    encoded = base64.b64encode(rendered.encode("utf-8")).decode("ascii")
+    return f"{META_MARKER}\n{encoded}\n-->"
+
+
+def _parse_metadata_payload(payload: str) -> dict:
+    stripped = payload.strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        decoded = base64.b64decode(stripped, validate=True).decode("utf-8")
+        return json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Failed to parse existing metadata block: {exc}") from exc
 
 
 def strip_metadata_block(text: str) -> tuple[str, dict]:
-    pattern = re.compile(
-        rf"\n?{re.escape(META_START)}\n(.*?)\n{re.escape(META_END)}\n?",
+    single_comment_pattern = re.compile(
+        rf"\n?{re.escape(META_MARKER)}\n(.*?)\n-->\n?",
         re.DOTALL,
     )
-    match = pattern.search(text)
-    if not match:
+    match = single_comment_pattern.search(text)
+    if match:
+        payload = match.group(1)
+        parsed = _parse_metadata_payload(payload)
+        stripped = text[: match.start()] + text[match.end() :]
+        return stripped, parsed
+
+    legacy_pattern = re.compile(
+        rf"\n?{re.escape(LEGACY_META_START)}\n(.*?)\n{re.escape(LEGACY_META_END)}\n?",
+        re.DOTALL,
+    )
+    legacy_match = legacy_pattern.search(text)
+    if not legacy_match:
         return text, {}
-    payload = match.group(1)
-    try:
-        parsed = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"Failed to parse existing metadata block: {exc}") from exc
-    stripped = text[: match.start()] + text[match.end() :]
+    payload = legacy_match.group(1)
+    parsed = _parse_metadata_payload(payload)
+    stripped = text[: legacy_match.start()] + text[legacy_match.end() :]
     return stripped, parsed
 
 
