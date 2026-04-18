@@ -1,0 +1,4 @@
+interface:
+  display_name: "Monthly Platform Report"
+  short_description: "Build the monthly platform-report PDF from the three wiki changelogs"
+  default_prompt: "Use $monthly-platform-report to generate the monthly Platform Report PDF from the afx-markets, afx-hedge-fund, and igi-fund-managers wiki changelogs. Extract the requested month, synthesize concrete executive-ready report copy, render the branded PDF, and return the month covered, output path, source repos used, and any notable synthesis choices."
