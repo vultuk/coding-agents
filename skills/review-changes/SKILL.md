@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Orchestrate parallel diff review by collecting one canonical diff packet, sending it to a fixed six-reviewer provider-diverse panel, adjudicating their outputs with `review-changes-adjudicator`, and returning one final markdown review. Use when asked to review local changes, staged changes, commit ranges, or pull request diffs.
+description: Orchestrate parallel diff review in Codex Desktop by collecting one canonical diff packet, spawning named GPT-5.3-Codex-Spark reviewer subagents, sending their outputs to one GPT-5.5 adjudicator/orchestrator subagent, and returning one final markdown review. Use when asked to review local changes, staged changes, commit ranges, or pull request diffs.
 ---
 
 # Review Changes
@@ -15,7 +15,7 @@ Use this skill to orchestrate the review flow, not to review the diff yourself.
   - `commit:<base>..<head>`
   - `pr:<number>`
 - Plain-language equivalents such as `review staged changes` are accepted.
-- Reviewer fanout is fixed at `6` total reviewers: two parallel invocations each of OpenAI, Claude, and Gemini.
+- Reviewer fanout defaults to `3` total Codex subagents. Reviewers use `gpt-5.3-codex-spark` by default, and the adjudicator/orchestrator uses `gpt-5.5` by default, unless the user explicitly requests a different fanout or model.
 - If the caller already provides a canonical review packet and asks for a single review, use reviewer-only mode.
 - If the caller already provides multiple reviewer outputs plus the canonical packet and asks for consolidation, use adjudicator-only mode.
 
@@ -25,16 +25,18 @@ Choose the narrowest mode that matches the request:
 
 1. `Parallel orchestration` (default)
 - Use when the user asks for a review of local changes, staged changes, a commit range, or a PR diff and has not already provided a canonical diff packet.
-- This mode runs the fixed six-reviewer panel in parallel and one adjudicator agent.
+- This mode runs the default three-reviewer Codex subagent panel in parallel and one adjudicator/orchestrator subagent.
 
 2. `Reviewer-only`
 - Use when the caller already provides a canonical diff packet and explicitly asks for a single review output, or when the request says to act only as one reviewer.
-- In this mode, do not spawn more agents.
+- If you are the top-level Codex instance, spawn exactly one reviewer subagent by default.
+- If you are already running inside a reviewer worker, do not spawn more agents; review the packet directly.
 - Return exactly one markdown review output using the contract below.
 
 3. `Adjudicator-only`
 - Use when the caller provides multiple reviewer outputs plus the canonical diff packet and asks for a final consolidated review.
-- In this mode, do not spawn reviewer agents.
+- If you are the top-level Codex instance, spawn exactly one adjudicator/orchestrator subagent by default.
+- If you are already running inside an adjudicator/orchestrator worker, do not spawn more agents; adjudicate directly.
 - Return exactly one final markdown review using the same structure below.
 
 ## Require Inputs and Preconditions
@@ -55,21 +57,33 @@ When operating in default mode, execute this workflow:
 - `staged`: use `git diff --staged`
 - `local` or unset: collect both `git diff` and `git diff --staged`
 
-2. Collect the changed file list.
+2. Collect the changed file list from the same diff content that will be included in the canonical packet. If you intentionally omit a changed file from the diff, omit it from `Changed files` or list it separately as `Omitted from diff`.
 3. If there is no diff content, return `No changes found to review.`
 4. Build one canonical review packet and reuse it for every reviewer and for the adjudicator.
-5. Run this fixed six-reviewer panel in parallel with the same canonical packet, and include the reviewer instance label in each reviewer invocation payload:
-- `review-changes-reviewer-openai` as reviewer `openai-1`
-- `review-changes-reviewer-openai` as reviewer `openai-2`
-- `review-changes-reviewer-claude` as reviewer `claude-1`
-- `review-changes-reviewer-claude` as reviewer `claude-2`
-- `review-changes-reviewer-gemini` as reviewer `gemini-1`
-- `review-changes-reviewer-gemini` as reviewer `gemini-2`
+5. Spawn this default three-reviewer panel in parallel with the same canonical packet. Use `spawn_agent` with `agent_type: "worker"` and `model: "gpt-5.3-codex-spark"` for each reviewer. Include the reviewer instance label in each reviewer invocation payload:
+- `codex-reviewer-1`
+- `codex-reviewer-2`
+- `codex-reviewer-3`
 6. Preserve those reviewer instance labels when collecting outputs so agreement and failures can be tracked per run.
 7. If one or more reviewers fail, continue with successful outputs.
 8. If all reviewers fail, return the failure details.
-9. Send the canonical packet plus all successful reviewer outputs to one `review-changes-adjudicator` subagent.
-10. Return the adjudicated markdown review plus one short consensus note in the format `6 attempted / <n> succeeded / failed: <reviewer-instance-labels-or-none>`.
+9. Spawn one adjudicator/orchestrator subagent with `spawn_agent` using `agent_type: "worker"` and `model: "gpt-5.5"`. Label it `codex-review-orchestrator`.
+10. Send the canonical packet plus all successful reviewer outputs to `codex-review-orchestrator`.
+11. Return the adjudicated markdown review plus one short consensus note in the format `3 attempted / <n> succeeded / failed: <reviewer-instance-labels-or-none>`.
+
+Do not use provider-specific reviewer names in Codex Desktop by default. The purpose of the fanout is independent parallel review with a fast reviewer model, followed by stronger adjudication.
+
+## Codex Desktop Subagents
+
+- Use `spawn_agent`, not shell-launched agent CLIs, to create reviewer and orchestrator workers.
+- Use `agent_type: "worker"` for every spawned subagent.
+- Use `model: "gpt-5.3-codex-spark"` for reviewer workers.
+- Use `model: "gpt-5.5"` for the adjudicator/orchestrator worker.
+- Only use a different model when the user explicitly requests one.
+- Put the intended worker name in the message body, for example `Reviewer label: codex-reviewer-3` or `Orchestrator label: codex-review-orchestrator`.
+- Include the complete reviewer or adjudicator output contract in each spawned worker message. A generic Codex Desktop worker may not automatically load the repo-level prompt files.
+- Do not ask subagents to edit files. Reviewers and the orchestrator are read-only reasoning workers over the canonical packet supplied in their prompt.
+- The top-level Codex instance remains responsible for collecting diffs, spawning/waiting for workers, tracking failures, and returning the final adjudicated review.
 
 ## Canonical Review Packet
 
@@ -97,10 +111,14 @@ Use this exact wrapper when invoking each reviewer:
 
 ```text
 You are running the review-changes reviewer worker.
+Reviewer label: <codex-reviewer-N>
 Review only the provided diff packet.
-Follow your output contract exactly.
+Follow the reviewer output contract included below exactly.
 Return exactly one markdown review output.
 Do not spawn additional agents.
+
+Reviewer output contract:
+<paste the full Output Contract, LGTM Mode, and Merge Decision Rule sections from this skill>
 ```
 
 ## Adjudicator Wrapper
@@ -108,20 +126,26 @@ Do not spawn additional agents.
 Use this exact wrapper when invoking the adjudicator:
 
 ```text
-You are running the review-changes adjudicator worker.
+You are running the review-changes adjudicator/orchestrator worker.
+Orchestrator label: codex-review-orchestrator
 Adjudicate these reviewer outputs into one final consolidated review.
 Keep only findings supported by evidence in the canonical diff packet.
 When reviewers disagree, prefer the highest-confidence interpretation and downgrade uncertain claims.
 Do not invent new findings unless directly evidenced in the diff.
-Use your markdown structure exactly.
+Follow the adjudicator output contract included below exactly.
 Return exactly one final markdown review.
 Do not spawn additional agents.
+
+Adjudicator output contract:
+<paste the full Output Contract, LGTM Mode, and Merge Decision Rule sections from this skill>
 ```
 
 ## Direct Delegation
 
-- If the caller already provides a canonical review packet and asks for a single review, invoke `review-changes-reviewer-openai` as the default single-review delegate and return its output.
-- If the caller already provides a canonical review packet plus reviewer outputs and asks for consolidation, invoke one `review-changes-adjudicator` and return its output.
+- If the caller already provides a canonical review packet and asks the top-level Codex instance for a single review, spawn one Codex worker with `model: "gpt-5.3-codex-spark"` labeled `codex-reviewer-1` and return its output.
+- If the caller already provides a canonical review packet and asks an already-running reviewer worker for a single review, do not spawn another worker; return the review directly.
+- If the caller already provides a canonical review packet plus reviewer outputs and asks the top-level Codex instance for consolidation, spawn one Codex worker with `model: "gpt-5.5"` labeled `codex-review-orchestrator` and return its output.
+- If the caller already provides a canonical review packet plus reviewer outputs and asks an already-running adjudicator/orchestrator worker for consolidation, do not spawn another worker; return the adjudicated review directly.
 
 ## Safety
 

@@ -277,6 +277,67 @@ class PrFeedbackLoopTests(unittest.TestCase):
         self.assertEqual(result3["status"], "actionable")
         self.assertEqual([item["key"] for item in result3["new_items"]], [second_ci["key"]])
 
+    def test_gh_checks_bucket_schema_is_normalised(self):
+        passing = MODULE.normalise_check_item(
+            {
+                "name": "Quality Lint",
+                "state": "SUCCESS",
+                "bucket": "pass",
+                "link": "https://github.com/acme/widgets/actions/runs/1",
+            },
+            "sha-1",
+        )
+        self.assertIsNone(passing)
+
+        failing = MODULE.normalise_check_item(
+            {
+                "name": "Quality Test",
+                "state": "FAILURE",
+                "bucket": "fail",
+                "link": "https://github.com/acme/widgets/actions/runs/2",
+            },
+            "sha-1",
+        )
+        self.assertIsNotNone(failing)
+        self.assertEqual(failing["key"], "ci:quality-test:sha-1")
+        self.assertEqual(failing["conclusion"], "fail")
+
+    def test_gh_checks_legacy_conclusion_schema_is_normalised(self):
+        failing = MODULE.normalise_check_item(
+            {
+                "name": "Legacy Test",
+                "state": "COMPLETED",
+                "conclusion": "failure",
+                "link": "https://github.com/acme/widgets/actions/runs/3",
+            },
+            "sha-1",
+        )
+
+        self.assertIsNotNone(failing)
+        self.assertEqual(failing["key"], "ci:legacy-test:sha-1")
+        self.assertEqual(failing["conclusion"], "failure")
+
+    def test_gh_checks_cancel_bucket_is_actionable(self):
+        cancelled = MODULE.normalise_check_item(
+            {
+                "name": "Cancelled Test",
+                "state": "COMPLETED",
+                "bucket": "cancel",
+                "link": "https://github.com/acme/widgets/actions/runs/4",
+            },
+            "sha-1",
+        )
+
+        self.assertIsNotNone(cancelled)
+        self.assertEqual(cancelled["key"], "ci:cancelled-test:sha-1")
+        self.assertEqual(cancelled["conclusion"], "cancel")
+
+    def test_gh_checks_command_requests_legacy_and_bucket_fields(self):
+        self.assertEqual(
+            MODULE.GH_CHECK_JSON_FIELDS,
+            "name,state,conclusion,bucket,link",
+        )
+
     def test_retry_counters_persist_across_runs(self):
         provider = FakeProvider([{"items": [make_review_item()]}])
         MODULE.run_monitor(
