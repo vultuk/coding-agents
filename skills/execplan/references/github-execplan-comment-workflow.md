@@ -290,12 +290,14 @@ This updates the exact `Progress` line keyed by `EP-002` and creates or replaces
 
 ## Review Gate
 
-Before the first commit is created, run the `review-changes` skill against the current local diff as a required pre-flight review. Treat the adjudicated output as binding for delivery:
+Before the first commit is created, run the `review-changes` skill against the current local diff as a required pre-flight review. Treat the adjudicated output as binding for delivery and loop until the latest adjudicated result is `LGTM`:
 
-1. Fix every `Must fix (blocking)` and `Should fix (important)` item that is in scope and safe to resolve.
+1. Fix every `Must fix (blocking)`, `Should fix (important)`, and in-scope `Nice to have / Nits` item that is safe to resolve.
 2. Re-run the relevant validation commands.
-3. Re-run `review-changes` if the local diff changed.
-4. Do not commit, push, or open a PR while blocking or important findings remain unresolved unless the managed comment clearly records the blocker, why it could not be resolved now, and what follow-up is required.
+3. Re-run `review-changes` against the updated local diff.
+4. Repeat the fix -> validation -> review loop until the adjudicated review returns `LGTM`.
+5. If `LGTM` cannot be reached safely, record the blocker, why it cannot be resolved now, and what follow-up is required; then stop before commit, push, and PR creation.
+6. Do not commit, push, or open a PR unless the latest adjudicated review is `LGTM`.
 
 Capture the review gate in both metadata and prose. At minimum, update:
 
@@ -304,6 +306,7 @@ Capture the review gate in both metadata and prose. At minimum, update:
 - `reviewGate.summary`
 - `reviewGate.fixesApplied`
 - `reviewGate.blockers`
+- `reviewGate.lgtm`
 
 ## Finalize the Delivery
 
@@ -315,7 +318,7 @@ Create a branch using the repository naming convention:
     BRANCH="fix/$ISSUE-$ISSUE_SLUG"
     git checkout -b "$BRANCH"
 
-Commit the work with an issue-linked message:
+Only after the review gate has returned `LGTM`, commit the work with an issue-linked message:
 
     git status --short
     git add <changed-files>

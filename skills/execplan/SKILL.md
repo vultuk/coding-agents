@@ -137,7 +137,7 @@ Use planning mode when the user asks to create, draft, refresh, or revise the Ex
 
 Use execution mode when the user asks to implement, continue, or execute the issue. In this mode, first refresh the managed issue comment so it reflects the current understanding, then perform the implementation. After every single completed unit of work, update the matching `Progress` item, append its audit evidence entry, patch that same GitHub comment, and re-read the remote comment to verify the intended change is visible before starting the next slice.
 
-Execution mode is not complete when code and tests are done locally. It remains in progress until the local diff has been reviewed with the `requesting-code-review` skill, every blocking or important finding has been resolved or turned into an explicit blocker, and only then the branch is committed, pushed, turned into a pull request, and handed back to the original issue author.
+Execution mode is not complete when code and tests are done locally. It remains in progress until the local diff has been reviewed with the `review-changes` skill, every finding has been resolved or turned into an explicit blocker, the adjudicated review returns `LGTM`, and only then the branch is committed, pushed, turned into a pull request, and handed back to the original issue author.
 
 ## Concurrency and Idempotence Rules
 
@@ -151,11 +151,13 @@ Execution mode is not complete when code and tests are done locally. It remains 
 
 ## Review, Delivery, and Handoff Rules
 
-Before any commit is created in execution mode, run the `requesting-code-review` skill against the local diff. Treat its adjudicated output as the required pre-flight review.
+Before any commit is created in execution mode, run the `review-changes` skill against the local diff. Treat its adjudicated output as the required pre-flight review and loop until it returns `LGTM`.
 
-- Fix every blocking security or logic issue and every other important finding that can be resolved safely in scope.
-- Re-run validation and re-run `requesting-code-review` whenever review-driven fixes change the diff.
-- Do not create the commit, push, or PR while blocking or important findings remain unresolved without an explicit documented blocker and rationale.
+- Fix every `Must fix (blocking)`, `Should fix (important)`, and in-scope `Nice to have / Nits` item that can be resolved safely.
+- Re-run validation after review-driven fixes, then re-run `review-changes` against the updated diff.
+- Continue the fix -> validation -> `review-changes` loop until the adjudicated review returns `LGTM`.
+- If a finding cannot be fixed safely in scope, stop the delivery flow and record an explicit blocker with rationale and follow-up; do not commit, push, or open a PR.
+- Do not create the commit, push, or PR unless the latest adjudicated `review-changes` result is `LGTM`.
 
 The metadata block and prose sections must capture the review gate state:
 
@@ -163,20 +165,22 @@ The metadata block and prose sections must capture the review gate state:
 - findings summary
 - whether fixes were applied
 - whether blockers remain
+- latest LGTM status
 
 When all planned work and validation are complete, finish the delivery instead of stopping at local changes:
 
 1. Review the managed comment one last time and ensure every completed `Progress` item, validation result, discovery, and outcome is reflected.
-2. Run the `requesting-code-review` skill against the current local diff before any commit is created.
-3. Fix or explicitly document the adjudicated findings.
-4. Re-run validation and review when the diff changes.
-5. Create or switch to a branch that uses the repository convention `fix/<issue-number>-<short-slug>` unless a suitable branch already exists.
-6. Commit the completed work with a concise imperative subject and a short body that explains what changed and why.
-7. Push the branch to `origin`.
-8. Create a pull request with explicit issue linkage and a reviewer-friendly description.
-9. Request review from the GitHub user who originally opened the issue when GitHub allows it.
-10. Create or update one final issue comment marked with `<!-- execplan:handoff -->`.
-11. Update the managed issue comment so it includes final delivery metadata.
+2. Run the `review-changes` skill against the current local diff before any commit is created.
+3. Fix every adjudicated finding that is safe and in scope.
+4. Re-run validation, then re-run `review-changes`; repeat until the latest adjudicated review returns `LGTM`.
+5. If `LGTM` cannot be reached safely, record the blocker in the managed issue comment and stop before commit, push, and PR creation.
+6. Create or switch to a branch that uses the repository convention `fix/<issue-number>-<short-slug>` unless a suitable branch already exists.
+7. Commit the completed work with a concise imperative subject and a short body that explains what changed and why.
+8. Push the branch to `origin`.
+9. Create a pull request with explicit issue linkage and a reviewer-friendly description.
+10. Request review from the GitHub user who originally opened the issue when GitHub allows it.
+11. Create or update one final issue comment marked with `<!-- execplan:handoff -->`.
+12. Update the managed issue comment so it includes final delivery metadata.
 
 The `Delivery Metadata` section must record:
 
@@ -211,9 +215,9 @@ Before posting or patching the managed comment, run `python3 skills/execplan/scr
 - Base the plan and implementation on evidence from the issue, repository, and executed commands in the current run.
 - Mark assumptions explicitly when issue requirements are incomplete.
 - Do not claim tests, builds, or manual checks passed unless they actually ran.
-- Do not self-waive pre-commit review. Run the `review-changes` skill, use its adjudicated output as the gate, and fix or explicitly document every `Must fix (blocking)` and `Should fix (important)` finding before delivery.
+- Do not self-waive pre-commit review. Run the `review-changes` skill, use its adjudicated output as the gate, and keep fixing, validating, and re-running review until the latest adjudicated result is `LGTM`. If `LGTM` cannot be reached safely, document the blocker and stop before commit, push, and PR creation.
 - Prefer additive, reversible steps. If a step is risky, document the rollback or retry path in `Idempotence and Recovery`.
-- Do not merge a PR or delete branches unless the user explicitly asks. Creating the branch, commit, push, linked PR, reviewer request, and final owner-notification comment is part of the normal completion flow for this skill, but only after the `review-changes` gate has been satisfied.
+- Do not merge a PR or delete branches unless the user explicitly asks. Creating the branch, commit, push, linked PR, reviewer request, and final owner-notification comment is part of the normal completion flow for this skill, but only after the `review-changes` gate has returned `LGTM`.
 
 ## Expected User Requests
 
@@ -226,4 +230,4 @@ Before posting or patching the managed comment, run `python3 skills/execplan/scr
 
 At the end of a planning-only run, report that the ExecPlan comment was created or updated and summarize the main milestones captured in it.
 
-At the end of an execution run, report what changed in code, which validations ran, that `review-changes` was run and what review-driven fixes were applied, whether any findings remain as explicit blockers, the branch name, commit hash, PR URL, whether the original issue author was requested as a reviewer, whether the final issue handoff comment tagged that author, and confirm that the managed issue comment was updated to match the current state.
+At the end of an execution run, report what changed in code, which validations ran, that `review-changes` was run until `LGTM`, what review-driven fixes were applied, whether any findings remain as explicit blockers, the branch name, commit hash, PR URL, whether the original issue author was requested as a reviewer, whether the final issue handoff comment tagged that author, and confirm that the managed issue comment was updated to match the current state.

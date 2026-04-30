@@ -1,4 +1,4 @@
 interface:
   display_name: "Review Changes"
-  short_description: "Run six-way diff review with adjudication"
-  default_prompt: "Use $review-changes to collect one canonical diff packet, send it to the fixed six-reviewer panel in parallel, adjudicate the results, and return one final review."
+  short_description: "Run Codex Spark reviewer fanout with GPT-5.5 adjudication"
+  default_prompt: "Use $review-changes to collect one canonical diff packet, spawn three named gpt-5.3-codex-spark reviewer subagents in parallel, send successful outputs to one gpt-5.5 codex-review-orchestrator subagent, and return one final review."

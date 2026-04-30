@@ -31,11 +31,14 @@ STATE_VERSION = 1
 MIN_POLL_SECONDS = 300
 DEFAULT_POLL_SECONDS = 300
 DEFAULT_JITTER_SECONDS = 120
-SUCCESSFUL_CHECK_STATES = {"success", "skipped", "neutral"}
+GH_CHECK_JSON_FIELDS = "name,state,conclusion,bucket,link"
+SUCCESSFUL_CHECK_STATES = {"success", "skipped", "neutral", "pass"}
 ACTIONABLE_CHECK_STATES = {
     "failure",
     "failed",
+    "fail",
     "timed_out",
+    "cancel",
     "cancelled",
     "canceled",
     "action_required",
@@ -263,7 +266,7 @@ def normalise_check_item(check: dict[str, Any], head_sha: str) -> dict[str, Any]
         return None
 
     state = str(check.get("state") or "").strip().lower()
-    conclusion = str(check.get("conclusion") or "").strip().lower()
+    conclusion = str(check.get("conclusion") or check.get("bucket") or "").strip().lower()
     terminal = conclusion or state
     if terminal in SUCCESSFUL_CHECK_STATES or terminal == "pending":
         return None
@@ -401,13 +404,13 @@ class LiveGitHubProvider:
                         "checks",
                         selector,
                         "--json",
-                        "name,state,conclusion,link",
+                        GH_CHECK_JSON_FIELDS,
                     ]
                 )
             )
         except WorkflowBlockedError as exc:
-            # Some gh builds do not expose the "conclusion" JSON field on `gh pr checks`.
-            if "Unknown JSON field: \"conclusion\"" not in str(exc):
+            # Some gh builds do not expose every `gh pr checks` JSON field.
+            if "Unknown JSON field:" not in str(exc):
                 raise
             checks = ensure_list(
                 gh_json(
