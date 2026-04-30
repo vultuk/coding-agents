@@ -1,4 +1,4 @@
 interface:
   display_name: "Wiki Changelog"
   short_description: "Maintain wiki changelogs from merged PRs"
-  default_prompt: "Use $wiki-changelog to update this repository wiki Changelog.md from merged pull requests, grouped by day and summarized for non-technical readers."
+  default_prompt: "Use $wiki-changelog to update this repository wiki Changelog.md from merged pull requests, grouped by day and summarized for non-technical readers. Keep each date concrete and distinct, naming the actual product areas or workflows that changed, and avoid generic filler like 'focused on', 'new capabilities', or 'more polished and dependable experience'."

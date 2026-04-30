@@ -28,6 +28,8 @@ Perform this claim step before generating the first ExecPlan draft so other huma
 
 After the managed ExecPlan comment has been created successfully, clear the temporary claim signal by removing the `👀` reaction from the issue and add the label `in progress`. Keep this step idempotent as well: removing a missing reaction or re-adding an existing label must not break the workflow.
 
+Practical GitHub API note: deleting issue reactions via REST can return `404 Not Found` even when the reaction is visible. Prefer the GraphQL `removeReaction` mutation keyed by the issue node ID when clearing your own `EYES` reaction, and treat a missing reaction as a no-op.
+
 ## Load the Right Context
 
 1. Read the target issue title, original author, body, labels, state, and existing comments.
@@ -135,7 +137,7 @@ Use planning mode when the user asks to create, draft, refresh, or revise the Ex
 
 Use execution mode when the user asks to implement, continue, or execute the issue. In this mode, first refresh the managed issue comment so it reflects the current understanding, then perform the implementation. After every single completed unit of work, update the matching `Progress` item, append its audit evidence entry, patch that same GitHub comment, and re-read the remote comment to verify the intended change is visible before starting the next slice.
 
-Execution mode is not complete when code and tests are done locally. It remains in progress until the local diff has been reviewed with the `review-changes` skill, every `Must fix (blocking)` and `Should fix (important)` finding has been resolved or turned into an explicit blocker, and only then the branch is committed, pushed, turned into a pull request, and handed back to the original issue author.
+Execution mode is not complete when code and tests are done locally. It remains in progress until the local diff has been reviewed with the `requesting-code-review` skill, every blocking or important finding has been resolved or turned into an explicit blocker, and only then the branch is committed, pushed, turned into a pull request, and handed back to the original issue author.
 
 ## Concurrency and Idempotence Rules
 
@@ -149,10 +151,10 @@ Execution mode is not complete when code and tests are done locally. It remains 
 
 ## Review, Delivery, and Handoff Rules
 
-Before any commit is created in execution mode, run the `review-changes` skill against the local diff. Treat its adjudicated output as the required pre-flight review.
+Before any commit is created in execution mode, run the `requesting-code-review` skill against the local diff. Treat its adjudicated output as the required pre-flight review.
 
-- Fix every `Must fix (blocking)` and `Should fix (important)` item that can be resolved safely in scope.
-- Re-run validation and re-run `review-changes` whenever review-driven fixes change the diff.
+- Fix every blocking security or logic issue and every other important finding that can be resolved safely in scope.
+- Re-run validation and re-run `requesting-code-review` whenever review-driven fixes change the diff.
 - Do not create the commit, push, or PR while blocking or important findings remain unresolved without an explicit documented blocker and rationale.
 
 The metadata block and prose sections must capture the review gate state:
@@ -165,7 +167,7 @@ The metadata block and prose sections must capture the review gate state:
 When all planned work and validation are complete, finish the delivery instead of stopping at local changes:
 
 1. Review the managed comment one last time and ensure every completed `Progress` item, validation result, discovery, and outcome is reflected.
-2. Run the `review-changes` skill against the current local diff before any commit is created.
+2. Run the `requesting-code-review` skill against the current local diff before any commit is created.
 3. Fix or explicitly document the adjudicated findings.
 4. Re-run validation and review when the diff changes.
 5. Create or switch to a branch that uses the repository convention `fix/<issue-number>-<short-slug>` unless a suitable branch already exists.

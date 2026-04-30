@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -384,6 +385,50 @@ class PrFeedbackLoopTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["new_items"], [])
         self.assertIn("Issue creation failed", result["blocked_reasons"][0]["reason"])
+
+    def test_fetch_iteration_falls_back_when_gh_checks_conclusion_field_is_unsupported(self):
+        provider = MODULE.LiveGitHubProvider("42")
+        context = make_context()
+
+        def fake_gh_json(cmd):
+            if cmd[:4] == ["gh", "api", f"repos/{context['repo']}/pulls/42/reviews?per_page=100"]:
+                return []
+            if cmd[:4] == ["gh", "api", f"repos/{context['repo']}/issues/42/comments?per_page=100"]:
+                return []
+            if cmd[:4] == ["gh", "pr", "checks", "42"] and cmd[-1] == "name,state,conclusion,link":
+                raise MODULE.WorkflowBlockedError(
+                    'Command failed: gh pr checks 42 --json name,state,conclusion,link\nUnknown JSON field: "conclusion"'
+                )
+            if cmd[:4] == ["gh", "pr", "checks", "42"] and cmd[-1] == "name,state,link,description,workflow":
+                return [
+                    {
+                        "name": "Quality Test",
+                        "state": "SUCCESS",
+                        "link": "https://github.com/acme/widgets/actions/runs/1",
+                        "description": "",
+                        "workflow": "PR Validation",
+                    }
+                ]
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                return {
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "reviewThreads": {
+                                    "nodes": [],
+                                }
+                            }
+                        }
+                    }
+                }
+            raise AssertionError(f"Unexpected gh_json command: {cmd}")
+
+        with mock.patch.object(provider, "resolve_context", return_value=context):
+            with mock.patch.object(MODULE, "gh_json", side_effect=fake_gh_json):
+                iteration = provider.fetch_iteration(context, "agent")
+
+        self.assertEqual(iteration.items, [])
+        self.assertEqual(iteration.failed_checks, [])
 
 
 if __name__ == "__main__":

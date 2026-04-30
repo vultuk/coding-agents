@@ -35,6 +35,16 @@ The output should closely match the established branded PDF style:
 - The helper script in this skill:
   - `scripts/monthly_platform_report.py`
 
+### Important linked-file note
+
+The helper script is a **linked skill file**, not something that will necessarily exist under the current shell working directory. Load it with:
+
+```python
+skill_view(name="monthly-platform-report", file_path="scripts/monthly_platform_report.py")
+```
+
+Then, if needed for execution, write that content into a runnable path in the active workspace before calling it. Do **not** assume `python skills/monthly-platform-report/scripts/monthly_platform_report.py ...` will work unless you have already confirmed that path exists in the current filesystem context.
+
 ## Preflight
 
 1. Set GitHub auth path when working in work-dev:

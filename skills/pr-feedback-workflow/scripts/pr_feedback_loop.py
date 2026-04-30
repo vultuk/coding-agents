@@ -392,18 +392,35 @@ class LiveGitHubProvider:
         issue_comments = ensure_list(
             gh_json(["gh", "api", f"repos/{repo}/issues/{pr_number}/comments?per_page=100"])
         )
-        checks = ensure_list(
-            gh_json(
-                [
-                    "gh",
-                    "pr",
-                    "checks",
-                    selector,
-                    "--json",
-                    "name,state,conclusion,link",
-                ]
+        try:
+            checks = ensure_list(
+                gh_json(
+                    [
+                        "gh",
+                        "pr",
+                        "checks",
+                        selector,
+                        "--json",
+                        "name,state,conclusion,link",
+                    ]
+                )
             )
-        )
+        except WorkflowBlockedError as exc:
+            # Some gh builds do not expose the "conclusion" JSON field on `gh pr checks`.
+            if "Unknown JSON field: \"conclusion\"" not in str(exc):
+                raise
+            checks = ensure_list(
+                gh_json(
+                    [
+                        "gh",
+                        "pr",
+                        "checks",
+                        selector,
+                        "--json",
+                        "name,state,link,description,workflow",
+                    ]
+                )
+            )
 
         thread_query = """
 query($owner:String!, $repo:String!, $pr:Int!) {

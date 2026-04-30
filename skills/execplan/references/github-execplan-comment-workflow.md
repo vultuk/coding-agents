@@ -185,17 +185,21 @@ Patch the metadata block with the resolved `commentId` after creation:
 
 After the managed comment exists, remove the temporary `👀` reaction and add the `in progress` label:
 
-    VIEWER=$(gh api graphql -f query='query { viewer { login } }' --jq '.data.viewer.login')
-    EYES_REACTION_ID=$(gh api "repos/$REPO/issues/$ISSUE/reactions" \
-      -H "Accept: application/vnd.github+json" \
-      --jq "map(select(.content == \"eyes\" and .user.login == \"$VIEWER\")) | first | .id // empty")
+    OWNER=$(echo "$REPO" | cut -d/ -f1)
+    REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
+    ISSUE_NODE_ID=$(gh api graphql \
+      -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){id}}}' \
+      -f owner="$OWNER" \
+      -f repo="$REPO_NAME" \
+      -F number="$ISSUE" \
+      --jq '.data.repository.issue.id')
 
-    if [ -n "$EYES_REACTION_ID" ]; then
-      gh api "repos/$REPO/issues/reactions/$EYES_REACTION_ID" \
-        -X DELETE \
-        -H "Accept: application/vnd.github+json" \
-        >/dev/null
-    fi
+    # Prefer GraphQL removeReaction here. The REST delete-by-reaction-id path can 404 unexpectedly
+    # even when the eyes reaction is visible, while GraphQL removal by issue node ID is idempotent.
+    gh api graphql \
+      -f query='mutation($subjectId:ID!){removeReaction(input:{subjectId:$subjectId,content:EYES}){subject{id}}}' \
+      -f subjectId="$ISSUE_NODE_ID" \
+      >/dev/null || true
 
     LABEL_EXISTS=$(gh api "repos/$REPO/labels/in%20progress" --silent >/dev/null 2>&1; echo $?)
     if [ "$LABEL_EXISTS" -ne 0 ]; then

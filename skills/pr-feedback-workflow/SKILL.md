@@ -12,7 +12,8 @@ Use this skill when the user wants an open pull request monitored continuously r
 - `PR` optional. Accept a PR number or PR URL. Default: the PR for the current branch.
 - `MODE=watch|once` optional. Default: `watch`.
 - `POLL_SECONDS` optional. Default: `300`. Minimum: `300`.
-- `STATE_FILE` optional. Default: `.git/codex/pr-feedback-workflow/pr-<number>.json` in the current repository.
+- `STATE_FILE` optional. Default: `.codex/pr-feedback-workflow/pr-<number>.json` in the current repository.
+  - Use a repo-local path outside `.git/` because git worktrees expose `.git` as a file, which breaks helper state-directory creation.
 
 ## Required Helper
 
@@ -63,6 +64,28 @@ Optional update flags:
 
 Persist workflow state atomically after each helper invocation. The state file is the source of truth for dedupe, resume, and retry tracking.
 
+### Worktree path caveat
+
+In git worktrees, `.git` is often a file that points at the shared git dir, not a directory. That means the documented default path `.git/codex/pr-feedback-workflow/pr-<number>.json` can fail with `NotADirectoryError` when used literally from a worktree checkout.
+
+When running this workflow inside a worktree, choose an explicit writable state-file path outside `.git/...`, for example:
+
+- `/tmp/pr-<number>-feedback-state.json` for short-lived runs
+- another repo-adjacent writable path that is not nested under the `.git` file
+
+Before starting the helper, verify the chosen parent path is a real directory.
+
+### Repo-local `.codex/` caveat
+
+Some repos already track files under `.codex/` (for example checked-in environment config). In those repos, using a repo-local state path like `.codex/pr-feedback-workflow/...` can create noisy untracked files and make cleanup risky because removing the directory may also touch tracked `.codex` contents.
+
+If `git status --short .codex` shows tracked or modified files, prefer a non-repo state path such as:
+
+- `/tmp/pr-feedback-workflow/pr-<number>.json`
+- another user-writable temp/cache directory outside the checkout
+
+Treat the state file as workflow metadata, not product code: do not commit it.
+
 Stable state fields:
 
 - `repo`
@@ -89,6 +112,17 @@ Operational rules:
 
 ## Workflow
 
+### GitHub auth environment note
+
+The helper shells out to `gh`, so it inherits whatever auth environment the current shell has.
+In work-dev, `gh` auth commonly lives outside the profile-isolated `HOME`, so export:
+
+```bash
+export GH_CONFIG_DIR=/home/ec2-user/.config/gh
+```
+
+before running the helper or any `gh pr` / `gh api` commands. Otherwise the helper can report a blocked "please run gh auth login" state even when GitHub CLI auth already exists.
+
 ### 1. Resolve PR Context
 
 Use the helper or `gh pr view` to resolve the PR. If no PR exists for the current branch and none was provided explicitly, stop and report that clearly.
@@ -111,11 +145,46 @@ For each item in `new_items` and `updated_items`, choose exactly one path:
 2. No code change needed: reply with evidence-based explanation.
 3. Out of scope: draft a follow-up with `$issue-writer`, create it with `gh issue create`, then reply with the issue link.
 
+Before changing code, verify whether the newly surfaced feedback is already satisfied on the current PR head.
+Sometimes review bots comment on an older head SHA or the user re-runs this workflow after the fix has already been pushed.
+In that case:
+
+- inspect the current branch / HEAD commit and relevant files/tests first
+- if the work is already present, do **not** manufacture a no-op follow-up commit
+- reply on the thread with concrete evidence from the current head, including commit hash, file paths, and validation commands where relevant
+- resolve the thread and update workflow state normally
+
+Treat this as the preferred path whenever the codebase already matches the requested change.
+
 Treat human and bot reviews equally. For every actionable thread, always post a direct thread reply.
+
+If the helper surfaces PR-level bot review summaries or other informational review items that do not require a reply, explicitly mark them handled after confirming all actionable child threads are resolved. Otherwise the workflow can remain artificially `actionable` with only summary reviews left in `pending_items`.
+
+Use the item key exactly as surfaced by the helper, which is often a `review:<id>` key for these summaries, for example:
+
+```bash
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
+  --mode once \
+  --state-file "$STATE_FILE" \
+  --mark-handled "review:4133890831" \
+  --set-last-action "Marked informational bot review summary as handled after resolving its child threads"
+```
 
 ### 4. Persist Action Outcomes Immediately
 
 After each reply, fix, thread resolution, blocker, or retry update, write it back to the state file before re-entering watch mode.
+
+### 4.5. Verify Working Tree Cleanliness Before Pushing
+
+After implementing a feedback round, but before posting final PR replies, run `git status --short` and make sure every intended code, test, and migration change is either committed or intentionally excluded.
+
+This matters because PR-feedback loops often touch supporting files outside the primary implementation path, for example:
+
+- route/unit/e2e mocks that must be updated after service/repository changes
+- generated DB migrations and snapshot metadata
+- test fixtures added during regression coverage work
+
+Do not assume the files you staged for the main fix are the only ones that changed. If `git status --short` still shows relevant modified files after a commit, commit and push them before replying that the feedback is addressed.
 
 Examples:
 
@@ -163,6 +232,55 @@ Even in a blocked state, leave the saved state file intact so the run can resume
 - If a review has a meaningful top-level body, add one PR-level comment summarising what changed.
 - Use concise, evidence-based replies with concrete file paths or codebase references.
 - Use UK spelling in user-facing text.
+
+### Requirement-source arbitration
+
+Do not assume every automated review suggestion should be implemented verbatim.
+Before changing code for a review comment, check the governing requirement source when one exists, for example:
+
+- the linked issue or PRD
+- the PR description
+- acceptance criteria or QA notes already attached to the work
+
+If a review suggestion conflicts with the explicit product requirement, do **not** blindly implement it just to silence the bot. Instead:
+
+1. confirm the requirement text with citations
+2. keep or restore the implementation that matches the requirement
+3. reply on the thread with an evidence-based explanation that cites the requirement source and relevant file paths/tests
+4. add or update regression coverage so the intended behaviour is explicit
+
+If a reviewer claims a bug, race, or semantic mismatch and investigation shows the current implementation is already correct, prefer a **regression-only** response over speculative production edits:
+
+1. write a focused test that exercises the claimed scenario as directly as possible
+2. run it to determine whether the current code actually fails or already behaves correctly
+3. if the code is already correct, keep production code unchanged, commit the regression test, and reply with evidence from that test
+4. if the test proves the reviewer is right, then implement the minimal fix and keep the new regression coverage
+
+This is especially important for concurrency ordering, async lifecycle concerns, threshold/tolerance debates, signed-vs-absolute values, and other cases where a reviewer may be optimising for implementation intuition rather than the stated product contract.
+
+TanStack Query refresh nuance for Portal/UI fixes:
+
+- In React Query / TanStack Query, `query.refetch()` does not necessarily throw when the refresh fails; it commonly resolves with a result object where `isError` is true.
+- If a success banner, resolved state, or button re-enable depends on a successful refresh, do not treat `await query.refetch()` alone as proof of success.
+- Prefer one of these patterns:
+  - inspect the returned result and gate success on `!result.isError`, or
+  - use `throwOnError` explicitly if that is the chosen convention in the codebase.
+- Add regression coverage for both cases when relevant:
+  - refresh returns an error result without throwing
+  - refresh throws/rejects outright
+
+Practical GitHub API note for review-comment replies:
+
+- For pull-request review comments surfaced as thread comment IDs, `gh api repos/<owner>/<repo>/pulls/comments/<comment_id>/replies` can 404 unexpectedly.
+- Prefer the PR-scoped route: `gh api repos/<owner>/<repo>/pulls/<pr_number>/comments/<comment_id>/replies -X POST -f body='...'`.
+- GraphQL `addPullRequestReviewThreadReply` can also work when you already have the thread node ID, but the PR-scoped REST path is the simplest reliable default.
+
+Practical state-handling note for resolved threads:
+
+- Once a review thread is resolved, the helper may stop surfacing that `thread:<id>` item on the next snapshot.
+- That means a later `--mark-handled thread:<id>` can fail with `Cannot mark unknown item as handled` even though the thread was successfully replied to and resolved.
+- Preferred sequence: reply, confirm the reply succeeded, resolve the thread, then use the next helper snapshot to verify the thread is gone. Only call `--mark-handled` for items that still exist in the helper state; for resolved threads that disappeared, rely on resolution plus the fresh snapshot and update `--set-last-action` instead.
+- Informational PR-level review summaries (`review:<id>`) often remain after child threads are resolved, so continue marking those explicitly when they no longer require action.
 
 Never resolve a thread until:
 
@@ -238,6 +356,8 @@ When monitoring ends, return a concise summary covering:
 - final CI state
 - unresolved-thread state
 - path to the saved state file
+
+Before reporting the final CI state after a push, verify the live check rollup directly, for example with `gh pr view <pr> --json statusCheckRollup`. The helper surfaces failed checks, but a fresh head SHA can still have validation in progress even when the workflow snapshot is otherwise idle. Report `pending` when checks are still running rather than claiming `pass` just because no failures have surfaced yet.
 
 ## Related Skills
 

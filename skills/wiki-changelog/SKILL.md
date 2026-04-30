@@ -25,14 +25,16 @@ Update a repository wiki changelog by grouping merged pull requests by day and w
 ## Validate Preconditions
 
 1. Run `gh auth status` and fail fast with a clear message if GitHub CLI authentication or repo access is missing.
-2. Confirm the repository wiki is accessible before doing substantive work.
-3. Clone the wiki into a temporary directory:
+2. In unattended or profile-isolated environments, set `GH_CONFIG_DIR` if GitHub auth lives outside the active `HOME`, then run `gh auth setup-git` so wiki clone/pull/push uses the GitHub CLI credential helper reliably.
+3. Set explicit commit identity before writing the wiki so commits do not fall back to generic machine defaults. Prefer exported environment variables for cron-safe runs, for example `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL`.
+4. Confirm the repository wiki is accessible before doing substantive work. Prefer `gh repo clone OWNER/REPO.wiki "${WORKDIR}/wiki"` or `git ls-remote https://github.com/OWNER/REPO.wiki.git`; do **not** rely on `gh repo view OWNER/REPO.wiki`, which can fail with a GraphQL repository-resolution error even when the wiki clone is accessible.
+5. Clone the wiki into a temporary directory:
 
 ```bash
 gh repo clone OWNER/REPO.wiki "${WORKDIR}/wiki"
 ```
 
-4. Ensure `Changelog.md` exists inside the wiki clone. If absent, create it with:
+6. Ensure `Changelog.md` exists inside the wiki clone. If absent, create it with:
 
 ```markdown
 # Changelog
@@ -44,6 +46,7 @@ gh repo clone OWNER/REPO.wiki "${WORKDIR}/wiki"
 - If a date exists, set the cutoff to that date at `23:59:59` in the requested timezone.
 - If no date exists, use `1970-01-01T00:00:00` in the requested timezone.
 - Never create a duplicate `## YYYY-MM-DD` section.
+- If the existing section for a date is present but clearly low-quality, generic, or repetitive, treat the task as a rewrite of that existing section instead of skipping it. In that case, regenerate the paragraph for the existing date from the merged PRs for that date and replace the old text in place.
 
 ## Fetch Merged Pull Requests
 
@@ -62,12 +65,34 @@ For each date with at least one merged PR:
 - Write one paragraph of `1-3` sentences.
 - Cluster related work into themes such as features, fixes, infrastructure, docs, or reliability.
 - Prefer plain language and user-facing outcomes.
+- Name the actual product areas, workflows, or systems touched whenever the PR data supports it: for example coverage reporting, LP exposure, copy trading, MT5 equity, settlement flows, onboarding, notifications, admin tooling, or specific services.
+- Use concrete nouns and verbs taken from PR titles and bodies; do **not** flatten a day into vague buckets when more specific phrasing is available.
 - Avoid PR numbers, branch names, commit hashes, and low-level implementation jargon.
 - Skip dates that already exist in `Changelog.md`.
 
+### Anti-Slop Rules
+
+Do **not** use repetitive filler or App-Store-style boilerplate such as:
+- "focused on ..."
+- "behind-the-scenes deployment and infrastructure work"
+- "clearer documentation and guidance"
+- "new capabilities"
+- "bug fixes and smoother day-to-day behavior"
+- "combining several small changes"
+- "more polished and dependable experience"
+
+Instead, summarize what actually changed and why it matters. A reader should be able to tell one date apart from another.
+
+Prefer this shape:
+- sentence 1: the most important concrete product or operational changes
+- sentence 2: secondary improvements or reliability work, also named specifically
+- optional sentence 3: only if needed for another clearly distinct theme
+
+If a date has many unrelated PRs, mention the top `2-4` concrete themes rather than collapsing everything into generic categories.
+
 Example tone:
 
-> Improved onboarding with clearer validation, tightened reliability in the deployment pipeline, and fixed edge-case failures that could interrupt exports for some users.
+> Coverage and exposure reporting became more consistent, with adjustments treated as active hedges, LP exposure shown in lots, and position pricing corrected for more accurate P/L. Copy-trading composition now aligns better with MAM details, and operators can control LP aggregation separately for bid and ask sides. Under the hood, Rust services and CI workflows were hardened for faster, more reliable delivery.
 
 ## Update The Wiki
 
