@@ -102,6 +102,7 @@ class FakeProvider:
             context=current_context,
             items=list(entry.get("items") or []),
             failed_checks=list(entry.get("failed_checks") or []),
+            pending_checks=list(entry.get("pending_checks") or []),
         )
 
 
@@ -229,6 +230,66 @@ class PrFeedbackLoopTests(unittest.TestCase):
         self.assertEqual(result["iteration"], 2)
         self.assertEqual(sleep_calls, [300])
 
+    def test_complete_when_clean_returns_after_no_work_and_no_pending_ci(self):
+        provider = FakeProvider([{"items": [], "pending_checks": []}])
+
+        result, _state = MODULE.run_monitor(
+            provider,
+            mode="watch",
+            poll_seconds=300,
+            state_file=self.state_file,
+            mark_handled=[],
+            blocked_specs=[],
+            increment_retry=[],
+            clear_retry=[],
+            last_action_summary=None,
+            jitter_seconds=0,
+            complete_when_clean=True,
+            sleep_fn=lambda _seconds: self.fail("clean goal mode should not sleep"),
+        )
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["pending_checks"], [])
+
+    def test_complete_when_clean_keeps_polling_while_ci_is_pending(self):
+        sleep_calls = []
+        pending = {
+            "key": "ci-pending:test-suite:sha-1",
+            "type": "ci_pending",
+            "head_sha": "sha-1",
+            "check_name": "Test Suite",
+            "summary": "Test Suite (pending)",
+            "state": "pending",
+            "conclusion": "",
+            "updated_at": "2026-03-26T10:10:00Z",
+            "url": "https://github.com/acme/widgets/actions/runs/1",
+        }
+        provider = FakeProvider(
+            [
+                {"items": [], "pending_checks": [pending]},
+                {"items": [], "pending_checks": []},
+            ]
+        )
+
+        result, _state = MODULE.run_monitor(
+            provider,
+            mode="watch",
+            poll_seconds=300,
+            state_file=self.state_file,
+            mark_handled=[],
+            blocked_specs=[],
+            increment_retry=[],
+            clear_retry=[],
+            last_action_summary=None,
+            jitter_seconds=0,
+            complete_when_clean=True,
+            sleep_fn=lambda seconds: sleep_calls.append(seconds),
+        )
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["iteration"], 2)
+        self.assertEqual(sleep_calls, [300])
+
     def test_same_ci_failure_same_sha_is_deduped_but_new_sha_reopens(self):
         first_ci = make_ci_item("sha-1", body_hash="ci-sha1")
         provider = FakeProvider([{"items": [first_ci], "failed_checks": [first_ci]}])
@@ -317,6 +378,21 @@ class PrFeedbackLoopTests(unittest.TestCase):
         self.assertIsNotNone(failing)
         self.assertEqual(failing["key"], "ci:legacy-test:sha-1")
         self.assertEqual(failing["conclusion"], "failure")
+
+    def test_pending_check_schema_is_normalised(self):
+        item = MODULE.normalise_pending_check_item(
+            {
+                "name": "Quality Lint",
+                "state": "IN_PROGRESS",
+                "conclusion": "",
+                "link": "https://github.com/acme/widgets/actions/runs/2",
+            },
+            "sha-1",
+        )
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["key"], "ci-pending:quality-lint:sha-1")
+        self.assertEqual(item["state"], "in_progress")
 
     def test_gh_checks_cancel_bucket_is_actionable(self):
         cancelled = MODULE.normalise_check_item(

@@ -6,9 +6,12 @@ Typical usage:
 
   python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode once
   python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode watch --poll-seconds 300
+  python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode watch --poll-seconds 300 --complete-when-clean
 
 In watch mode the helper keeps polling while the PR is idle, persists state after
 every poll, and returns only when new work, a blocker, or a closed PR is detected.
+With --complete-when-clean, it also returns status=complete once there is no
+actionable feedback, no blocker, no failed CI, and no pending/running CI.
 """
 
 from __future__ import annotations
@@ -33,6 +36,16 @@ DEFAULT_POLL_SECONDS = 300
 DEFAULT_JITTER_SECONDS = 120
 GH_CHECK_JSON_FIELDS = "name,state,conclusion,bucket,link"
 SUCCESSFUL_CHECK_STATES = {"success", "skipped", "neutral", "pass"}
+PENDING_CHECK_STATES = {
+    "pending",
+    "queued",
+    "requested",
+    "waiting",
+    "in_progress",
+    "in progress",
+    "running",
+    "expected",
+}
 ACTIONABLE_CHECK_STATES = {
     "failure",
     "failed",
@@ -62,6 +75,7 @@ class IterationData:
     context: dict[str, Any]
     items: list[dict[str, Any]]
     failed_checks: list[dict[str, Any]]
+    pending_checks: list[dict[str, Any]]
 
 
 def iso_now() -> str:
@@ -291,6 +305,32 @@ def normalise_check_item(check: dict[str, Any], head_sha: str) -> dict[str, Any]
     }
 
 
+def normalise_pending_check_item(check: dict[str, Any], head_sha: str) -> dict[str, Any] | None:
+    name = str(check.get("name") or "").strip()
+    if not name:
+        return None
+
+    state = str(check.get("state") or "").strip().lower()
+    conclusion = str(check.get("conclusion") or check.get("bucket") or "").strip().lower()
+    terminal = conclusion or state
+    if terminal in SUCCESSFUL_CHECK_STATES or terminal in ACTIONABLE_CHECK_STATES:
+        return None
+    if state not in PENDING_CHECK_STATES and terminal not in PENDING_CHECK_STATES:
+        return None
+
+    return {
+        "key": f"ci-pending:{slug(name)}:{head_sha}",
+        "type": "ci_pending",
+        "head_sha": head_sha,
+        "check_name": name,
+        "summary": f"{name} ({conclusion or state or 'pending'})",
+        "state": state,
+        "conclusion": conclusion,
+        "updated_at": iso_now(),
+        "url": check.get("link"),
+    }
+
+
 def normalise_iteration_data(
     context: dict[str, Any],
     reviews: list[dict[str, Any]],
@@ -301,6 +341,7 @@ def normalise_iteration_data(
 ) -> IterationData:
     items: list[dict[str, Any]] = []
     failed_checks: list[dict[str, Any]] = []
+    pending_checks: list[dict[str, Any]] = []
     head_sha = str(context.get("head_sha") or "")
 
     for review in reviews:
@@ -323,11 +364,15 @@ def normalise_iteration_data(
         if item:
             items.append(item)
             failed_checks.append(item)
+        pending_item = normalise_pending_check_item(check, head_sha)
+        if pending_item:
+            pending_checks.append(pending_item)
 
     return IterationData(
         context=context,
         items=sort_items(items),
         failed_checks=sort_items(failed_checks),
+        pending_checks=sort_items(pending_checks),
     )
 
 
@@ -693,6 +738,7 @@ def process_iteration(
     iteration: IterationData,
     state_file: Path,
     now: str,
+    complete_when_clean: bool = False,
 ) -> dict[str, Any]:
     context = iteration.context
     state["repo"] = context["repo"]
@@ -713,6 +759,7 @@ def process_iteration(
             "new_items": [],
             "updated_items": [],
             "failed_checks": [],
+            "pending_checks": [],
             "blocked_reasons": [],
             "state_file": str(state_file),
             "pending_items": [],
@@ -732,6 +779,8 @@ def process_iteration(
         status = "actionable"
     elif blocked_items:
         status = "blocked"
+    elif complete_when_clean and not iteration.pending_checks:
+        status = "complete"
     else:
         status = "idle"
 
@@ -743,6 +792,7 @@ def process_iteration(
         "new_items": new_items,
         "updated_items": updated_items,
         "failed_checks": iteration.failed_checks,
+        "pending_checks": iteration.pending_checks,
         "blocked_reasons": blocked_items,
         "state_file": str(state_file),
         "pending_items": pending_items,
@@ -769,6 +819,7 @@ def blocked_result(
         "new_items": [],
         "updated_items": [],
         "failed_checks": [],
+        "pending_checks": [],
         "blocked_reasons": [{"key": "workflow", "reason": reason}],
         "state_file": str(state_file),
         "pending_items": ensure_list(state.get("pending_items")),
@@ -800,6 +851,7 @@ def run_monitor(
     clear_retry: list[str],
     last_action_summary: str | None,
     jitter_seconds: int,
+    complete_when_clean: bool = False,
     sleep_fn: Any = time.sleep,
     randrange_fn: Any = random.randint,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -822,7 +874,13 @@ def run_monitor(
         try:
             iteration = provider.fetch_iteration(context, self_login)
             context = iteration.context
-            result = process_iteration(state, iteration, state_file, iso_now())
+            result = process_iteration(
+                state,
+                iteration,
+                state_file,
+                iso_now(),
+                complete_when_clean=complete_when_clean,
+            )
         except WorkflowBlockedError as exc:
             result = blocked_result(state, context, state_file, str(exc))
             save_state(state_file, state)
@@ -884,6 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_JITTER_SECONDS,
         help="Maximum random jitter added to idle sleeps in watch mode.",
     )
+    parser.add_argument(
+        "--complete-when-clean",
+        action="store_true",
+        help="Return status=complete instead of staying idle when there is no actionable feedback, no blockers, and no pending CI.",
+    )
     return parser
 
 
@@ -911,10 +974,12 @@ def main() -> None:
             clear_retry=args.clear_retry,
             last_action_summary=args.set_last_action,
             jitter_seconds=args.jitter_seconds,
+            complete_when_clean=args.complete_when_clean,
         )
     except WorkflowBlockedError as exc:
         blocked = {
             "status": "blocked",
+            "pending_checks": [],
             "blocked_reasons": [{"key": "workflow", "reason": str(exc)}],
         }
         print(json.dumps(blocked, indent=2, sort_keys=True))

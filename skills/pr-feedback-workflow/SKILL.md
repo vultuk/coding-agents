@@ -12,21 +12,43 @@ Use this skill when the user wants an open pull request monitored continuously r
 - `PR` optional. Accept a PR number or PR URL. Default: the PR for the current branch.
 - `MODE=watch|once` optional. Default: `watch`.
 - `POLL_SECONDS` optional. Default: `300`. Minimum: `300`.
+- `GOAL_DRIVEN=true|false` optional. Default: `true` when the Codex goal function is available.
 - `STATE_FILE` optional. Default: `.codex/pr-feedback-workflow/pr-<number>.json` in the current repository.
   - Use a repo-local path outside `.git/` because git worktrees expose `.git` as a file, which breaks helper state-directory creation.
+
+## Codex Goal Contract
+
+When the Codex goal function is available, set a concrete goal before entering the loop. Use `create_goal` in tool surfaces that expose `create_goal`, or the equivalent `set_goal` function in older/newer Codex surfaces.
+
+Goal objective template:
+
+```text
+Completely deal with PR <url-or-number>: all actionable review feedback has been fixed, explained, or moved to linked follow-up issues; all review threads that should be resolved are resolved; CI/CD has no failures and no checks still pending or running; the final PR state has been verified directly from GitHub.
+```
+
+Do not mark the goal complete until all of these are true on a fresh snapshot:
+
+- helper status is `complete`, or a one-shot helper snapshot plus direct GitHub checks prove the equivalent state
+- `new_items`, `updated_items`, `pending_items`, `failed_checks`, `pending_checks`, and `blocked_reasons` are all empty
+- `gh pr view <pr> --json statusCheckRollup` shows every current head check is terminal and successful/skipped/neutral
+- any actionable review threads have a posted reply or linked follow-up and are resolved when resolution is appropriate
+- `git status --short` has no uncommitted intended fix/test changes
+
+When those conditions are met, call the Codex goal completion function (`update_goal(status="complete")` where available) and then return the final response. If the PR is merged or closed before the clean state is reached, report that separately instead of marking the goal complete unless the user explicitly defined closure as success.
 
 ## Required Helper
 
 Use the helper as the canonical snapshot and state engine:
 
 ```bash
-python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode <watch|once> --poll-seconds 300 --state-file <path> [--pr <number|url>]
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode <watch|once> --poll-seconds 300 --state-file <path> [--complete-when-clean] [--pr <number|url>]
 ```
 
 In `watch` mode the helper must keep polling while the PR is idle and return only when one of these happens:
 
 - new or updated actionable work is present
 - a blocker is present
+- `--complete-when-clean` is set and the PR has no actionable work, no blockers, no failed checks, and no pending/running checks
 - the PR is merged or closed
 
 In `once` mode the helper returns one snapshot immediately.
@@ -39,8 +61,11 @@ The helper emits JSON with:
 - `new_items`
 - `updated_items`
 - `failed_checks`
+- `pending_checks`
 - `blocked_reasons`
 - `state_file`
+
+When `--complete-when-clean` is used, `status` may also be `complete`.
 
 The helper also supports state updates before the next snapshot:
 
@@ -127,15 +152,19 @@ before running the helper or any `gh pr` / `gh api` commands. Otherwise the help
 
 Use the helper or `gh pr view` to resolve the PR. If no PR exists for the current branch and none was provided explicitly, stop and report that clearly.
 
-### 2. Enter Watch Mode
+### 2. Enter Goal-Driven Watch Mode
 
-Default to:
+When goal-driven mode is active, default to:
 
 ```bash
-python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode watch --poll-seconds 300 --state-file "$STATE_FILE" [--pr "$PR"]
+python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py --mode watch --poll-seconds 300 --state-file "$STATE_FILE" --complete-when-clean [--pr "$PR"]
 ```
 
-Do not implement your own sleep loop in the agent. Let the helper absorb idle polls and return only when work, a blocker, or closure exists.
+Do not implement your own sleep loop in the agent. Let the helper absorb idle polls and return only when work, completion, a blocker, or closure exists.
+
+If the helper returns `status=complete`, perform the final direct GitHub verification listed in the Codex Goal Contract, then complete the Codex goal and stop. If the verification finds pending/running checks or unresolved actionable feedback, re-enter watch mode with the same state file.
+
+If the Codex goal function is unavailable and the user explicitly wants ongoing monitoring, use normal watch mode without `--complete-when-clean` and keep the older open-ended behaviour.
 
 ### 3. Process Every Surfaced Item
 
@@ -213,13 +242,14 @@ python3 skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
 
 ### 5. Resume Watch Mode
 
-After the current surfaced work is handled or recorded as blocked, go back to watch mode using the same state file. Do not stop just because one pass is green.
+After the current surfaced work is handled or recorded as blocked, go back to watch mode using the same state file. Do not stop just because one pass is green unless the helper returns `status=complete` and the direct GitHub final verification also passes.
 
 ### 6. Exit Conditions
 
 Stop only when:
 
 - the user explicitly says stop
+- the Codex goal is complete: no actionable review feedback remains, no blockers remain, and CI/CD is fully terminal green or neutral with nothing pending/running
 - the PR is merged
 - the PR is closed
 - an unrecoverable blocker is recorded and surfaced as `status=blocked`
@@ -327,6 +357,7 @@ LOOP_ITERATION=<n>
 NEW_ITEMS=<count>
 ACTION_TAKEN=fix|explain|follow-up-issue|retry|blocked|none
 CI=pass|fail|pending
+GOAL=active|complete|blocked
 STATE_FILE=<path>
 ```
 
@@ -341,6 +372,7 @@ python3 -m unittest discover -s skills/pr-feedback-workflow/tests -v
 Live manual validation on a disposable PR should confirm:
 
 - idle watch mode keeps polling instead of exiting
+- goal-driven watch mode returns `status=complete` only when no actionable feedback and no pending/running CI remain
 - a new review appears on the next surfaced snapshot
 - a failing check is deduped per failure class and head SHA
 - blocked issue creation leaves a resumable blocker instead of silently giving up
