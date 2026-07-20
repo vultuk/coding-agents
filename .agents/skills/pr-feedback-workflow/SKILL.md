@@ -1,6 +1,6 @@
 ---
 name: pr-feedback-workflow
-description: Continuously monitor an open GitHub pull request, process new review feedback and CI failures in a resumable loop, apply fixes or evidence-based replies, create follow-up issues when work is out of scope, resolve review threads, and keep re-entering watch mode until stopped.
+description: Continuously monitor an open GitHub pull request, process new review feedback and CI failures in a resumable loop, apply fixes or evidence-based replies, create follow-up issues when work is out of scope, resolve review threads, and when explicitly requested merge the clean PR and clean up local worktrees.
 ---
 
 # PR Feedback Workflow
@@ -15,6 +15,8 @@ Use this skill when the user wants an open pull request monitored continuously r
 - `GOAL_DRIVEN=true|false` optional. Default: `true` when the Codex goal function is available.
 - `STATE_FILE` optional. Default: `.codex/pr-feedback-workflow/pr-<number>.json` in the current repository.
   - Use a repo-local path outside `.git/` because git worktrees expose `.git` as a file, which breaks helper state-directory creation.
+- `MERGE_AFTER_CLEAN=true|false` optional. Default: `false`; set true only when the user explicitly asks to merge after feedback is clean.
+- `CLEANUP_WORKTREE=<path>` optional. Only use when the user explicitly asks to delete the task worktree after merge.
 
 ## Codex Goal Contract
 
@@ -33,6 +35,7 @@ Do not mark the goal complete until all of these are true on a fresh snapshot:
 - `gh pr view <pr> --json statusCheckRollup` shows every current head check is terminal and successful/skipped/neutral
 - any actionable review threads have a posted reply or linked follow-up and are resolved when resolution is appropriate
 - `git status --short` has no uncommitted intended fix/test changes
+- if the user requested merge/cleanup, the PR has been merged, the remote PR branch deletion has been verified, and the requested worktree cleanup has been verified
 
 When those conditions are met, call the Codex goal completion function (`update_goal(status="complete")` where available) and then return the final response. If the PR is merged or closed before the clean state is reached, report that separately instead of marking the goal complete unless the user explicitly defined closure as success.
 
@@ -244,7 +247,66 @@ python3 .agents/skills/pr-feedback-workflow/scripts/pr_feedback_loop.py \
 
 After the current surfaced work is handled or recorded as blocked, go back to watch mode using the same state file. Do not stop just because one pass is green unless the helper returns `status=complete` and the direct GitHub final verification also passes.
 
-### 6. Exit Conditions
+### 6. Merge and Cleanup When Explicitly Requested
+
+Only merge when the user explicitly asked for it, or when the user explicitly confirms a merge after the workflow reports clean state.
+
+Before merging, all of these must be true on fresh direct checks:
+
+- the helper returned `status=complete`, with empty `new_items`, `updated_items`, `pending_items`, `failed_checks`, `pending_checks`, and `blocked_reasons`
+- `gh pr view <pr> --json statusCheckRollup,mergeStateStatus,headRefOid,state` shows the current PR head, all checks terminal success/skipped/neutral, and `mergeStateStatus` is mergeable such as `CLEAN`
+- a direct review-thread query shows no unresolved review threads
+- every actioned review thread has a direct reply that names what changed or why no code change was needed
+- actioned review threads are resolved, including outdated threads, after the reply has posted successfully
+- `git status --short` is clean in the task checkout
+
+Use this unresolved-thread check before merge:
+
+```bash
+gh api graphql \
+  -f query='query($owner:String!, $repo:String!, $number:Int!) { repository(owner:$owner, name:$repo) { pullRequest(number:$number) { reviewThreads(first:100) { nodes { id isResolved } } } } }' \
+  -F owner="$OWNER" -F repo="$REPO" -F number="$PR_NUMBER" \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'
+```
+
+Resolve actioned threads explicitly with GraphQL after replying:
+
+```bash
+gh api graphql \
+  -f query='mutation($threadId:ID!) { resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } } }' \
+  -F threadId="$THREAD_ID"
+```
+
+Do not treat `reviewDecision=REVIEW_REQUIRED` by itself as an actionable item when direct thread checks show no unresolved review threads and `mergeStateStatus` is mergeable. Some repos still report review-required after bot comment reviews or member replies; rely on branch protection/mergeability plus unresolved-thread checks.
+
+Merge method:
+
+- use the method the user requested if specified
+- otherwise inspect recent main history with `git log --oneline --first-parent origin/main -8`
+- if recent history is squash-style PR commits, prefer `gh pr merge <pr> --squash --delete-branch`
+- if repository policy is unclear or branch protection blocks merge, stop and report the exact blocker instead of forcing a merge
+
+After merge, verify:
+
+```bash
+gh pr view "$PR" --json state,mergedAt,mergeCommit,headRefName,url
+git ls-remote --heads origin "$HEAD_BRANCH"
+```
+
+If the user asked to delete the task worktree after merge:
+
+1. confirm the task worktree is clean with `git status --short`
+2. remove it from the canonical source repo, not from inside the removed directory:
+
+   ```bash
+   git -C "$SOURCE_REPO" worktree remove "$WORKTREE_PATH"
+   git -C "$SOURCE_REPO" worktree prune
+   ```
+
+3. verify `test ! -d "$WORKTREE_PATH"`, `git -C "$SOURCE_REPO" worktree list`, and `git ls-remote --heads origin "$HEAD_BRANCH"` is empty
+4. never remove unrelated worktrees or the canonical source repo
+
+### 7. Exit Conditions
 
 Stop only when:
 
@@ -387,6 +449,8 @@ When monitoring ends, return a concise summary covering:
 - follow-up issues created
 - final CI state
 - unresolved-thread state
+- merge state and merge commit, if merged
+- remote branch deletion and worktree cleanup state, if requested
 - path to the saved state file
 
 Before reporting the final CI state after a push, verify the live check rollup directly, for example with `gh pr view <pr> --json statusCheckRollup`. The helper surfaces failed checks, but a fresh head SHA can still have validation in progress even when the workflow snapshot is otherwise idle. Report `pending` when checks are still running rather than claiming `pass` just because no failures have surfaced yet.
