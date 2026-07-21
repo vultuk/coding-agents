@@ -1,0 +1,15 @@
+interface:
+  display_name: "Whatsapp"
+  short_description: "Read, search, translate, and message safely"
+  default_prompt: "Use $whatsapp to show my latest WhatsApp messages."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "whatsapp-translator"
+      description: "Globally configured WhatsApp Translator MCP server"
+      transport: "streamable_http"
+      url: "https://whatsapp-translator-production.up.railway.app/mcp"
+
+policy:
+  allow_implicit_invocation: true
